@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Health Service</title>
+  <link rel="stylesheet" href="styles/main.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+
+<body>
+  <div id="app">
+    <!-- ─── Title Bar (Draggable) ─────────────────────────────── -->
+    <header id="titlebar">
+      <div class="titlebar-left">
+        <span class="app-logo">🛡️</span>
+        <span class="app-name">Security Health</span>
+      </div>
+      <div class="titlebar-right">
+        <button id="btn-settings" class="titlebar-btn">⚙️</button>
+        <button id="btn-shortcuts" class="titlebar-btn">⌨️</button>
+        <button id="btn-pin" class="titlebar-btn pinned">📌</button>
+        <button id="btn-minimize" class="titlebar-btn">─</button>
+        <button id="btn-close" class="titlebar-btn">✕</button>
+      </div>
+    </header>
+
+    <!-- ─── Status Bar ───────────────────────────────────────── -->
+    <div id="status-bar">
+      <div class="status-indicator">
+        <span id="status-dot" class="dot dot-idle"></span>
+        <span id="status-text">Ready — Press Start to Begin</span>
+        <span id="session-timer" class="session-timer hidden">00:00</span>
+      </div>
+      <div class="status-right">
+        <div id="opacity-control" class="opacity-control">
+          <span class="opacity-icon">◐</span>
+          <input type="range" id="opacity-slider" min="30" max="100" value="92" class="opacity-slider" />
+        </div>
+        <div class="status-indicators">
+          <span id="deepgram-status" class="api-badge">🎙️ ─</span>
+          <span id="openai-status" class="api-badge">🤖 ─</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Main Controls ────────────────────────────────────── -->
+    <div id="controls">
+      <button id="btn-start" class="control-btn start-btn">
+        <span class="btn-icon">▶</span>
+        <span class="btn-label">Start Listening</span>
+      </button>
+      <button id="btn-stop" class="control-btn stop-btn hidden">
+        <span class="btn-icon">■</span>
+        <span class="btn-label">Stop</span>
+      </button>
+      <button id="btn-screen" class="control-btn screen-btn">
+        <span class="btn-icon">🖥️</span>
+        <span class="btn-label">Screen</span>
+      </button>
+      <button id="btn-ask" class="control-btn ask-btn">
+        <span class="btn-icon">💡</span>
+        <span class="btn-label">Ask AI</span>
+      </button>
+    </div>
+
+    <!-- ─── Tabs ─────────────────────────────────────────────── -->
+    <div id="tabs">
+      <button class="tab active" data-tab="transcript">📝 Transcript</button>
+      <button class="tab" data-tab="ai-hints">🤖 AI Hints <span class="tab-badge hidden" id="badge-ai"></span></button>
+      <button class="tab" data-tab="summary">📋 Summary</button>
+      <button class="tab" data-tab="screen-analysis">🖥️ Screen</button>
+    </div>
+
+    <!-- ─── Panel Toolbar ────────────────────────────────────── -->
+    <div id="panel-toolbar">
+      <button id="btn-export" class="toolbar-btn">📥 Export</button>
+      <button id="btn-clear" class="toolbar-btn">🗑️ Clear</button>
+      <button id="btn-copy-all" class="toolbar-btn">📋 Copy</button>
+      <div class="toolbar-toggle" style="margin-left: auto; display: flex; align-items: center; gap: 8px;"
+        title="Include last screen analysis in future AI prompts">
+        <span style="font-size: 12px; color: #a1a1aa;">Keep Screen Context</span>
+        <label class="toggle" style="transform: scale(0.8); margin: 0;">
+          <input type="checkbox" id="toggle-screen-context" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- ─── Content Panels ───────────────────────────────────── -->
+    <div id="panels">
+      <!-- Transcript Panel -->
+      <div id="panel-transcript" class="panel active">
+        <div id="transcript-content" class="scrollable">
+          <div class="empty-state">
+            <span class="empty-icon">🎤</span>
+            <p>Start listening to see the live transcript here.</p>
+            <p class="hint">Audio from your microphone & system will be transcribed in real-time.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Hints Panel -->
+      <div id="panel-ai-hints" class="panel">
+        <div id="ai-content" class="scrollable">
+          <div class="empty-state">
+            <span class="empty-icon">🧠</span>
+            <p>AI-generated answers will appear here.</p>
+            <p class="hint">The AI watches the conversation and suggests responses when it detects questions. Add API
+              keys in your .env file to get real AI-powered answers tailored to your
+              resume and job description.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary Panel -->
+      <div id="panel-summary" class="panel">
+        <div id="summary-content" class="scrollable">
+          <div class="empty-state">
+            <span class="empty-icon">📋</span>
+            <p>Meeting summary will be generated here.</p>
+            <p class="hint">Click "Ask AI" and type "summarize" to get a summary at any time.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Screen Analysis Panel -->
+      <div id="panel-screen-analysis" class="panel">
+        <div id="screen-content" class="scrollable">
+          <div class="empty-state">
+            <span class="empty-icon">🖥️</span>
+            <p>Screen analysis results will appear here.</p>
+            <p class="hint">Click "Screen" or press Ctrl+Shift+S to capture and analyze what's on your screen.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── AI Input Bar ─────────────────────────────────────── -->
+    <div id="ai-input-bar" class="hidden">
+      <input type="text" id="ai-input" placeholder="Ask AI anything about this meeting..." />
+      <button id="btn-send-ai" class="send-btn">➤</button>
+    </div>
+
+    <!-- ─── Settings Overlay ─────────────────────────────────── -->
+    <div id="settings-overlay" class="overlay hidden">
+      <div class="overlay-content">
+        <div class="overlay-header">
+          <h2>⚙️ Settings & Context</h2>
+          <button id="btn-close-settings" class="overlay-close">✕</button>
+        </div>
+        <div class="overlay-body scrollable">
+          <!-- Resume Section -->
+          <div class="settings-section">
+            <label class="settings-label">📄 Your Resume / Background</label>
+            <p class="settings-hint">Paste your resume or key qualifications. The AI will use this to tailor answers.
+            </p>
+            <textarea id="input-resume" class="settings-textarea" rows="5"
+              placeholder="e.g. 5 years of experience in full-stack development with React, Node.js, AWS..."></textarea>
+          </div>
+
+          <!-- Job Description Section -->
+          <div class="settings-section">
+            <label class="settings-label">💼 Job Description</label>
+            <p class="settings-hint">Paste the job description you're interviewing for. AI answers will be tailored to
+              this role.</p>
+            <textarea id="input-job-desc" class="settings-textarea" rows="4"
+              placeholder="e.g. We are looking for a Senior Software Engineer to join our platform team..."></textarea>
+          </div>
+
+
+
+          <!-- Custom Instructions -->
+          <div class="settings-section">
+            <label class="settings-label">🎯 Custom Instructions</label>
+            <p class="settings-hint">Any extra context or instructions for the AI assistant.</p>
+            <textarea id="input-custom" class="settings-textarea" rows="3"
+              placeholder="e.g. Keep answers concise. Focus on system design topics. Use STAR method for behavioral questions."></textarea>
+          </div>
+
+          <!-- AI Model Selection (Custom Dropdown — renders inside protected window) -->
+          <div class="settings-section">
+            <label class="settings-label">🤖 AI Model</label>
+            <div class="settings-row">
+              <div id="model-dropdown" class="custom-dropdown">
+                <button type="button" id="model-dropdown-trigger" class="custom-dropdown-trigger">Gemini 2.5 Flash</button>
+                <div class="custom-dropdown-list">
+                  <div class="custom-dropdown-group-label">Google (Gemini / Vertex)</div>
+                  <div class="custom-dropdown-item selected" data-value="gemini-2.5-flash">Gemini 2.5 Flash</div>
+
+                  <div class="custom-dropdown-group-label">Mistral AI</div>
+                  <div class="custom-dropdown-item" data-value="mistral-large-latest">Mistral Large</div>
+                  <div class="custom-dropdown-item" data-value="open-mistral-nemo">Mistral Nemo</div>
+
+                  <div class="custom-dropdown-group-label">Cohere</div>
+                  <div class="custom-dropdown-item" data-value="command-r-plus-08-2024">Command R+</div>
+                  <div class="custom-dropdown-item" data-value="command-r-08-2024">Command R</div>
+
+                  <div class="custom-dropdown-group-label">Groq (Fast)</div>
+                  <div class="custom-dropdown-item" data-value="llama-3.3-70b-versatile">Llama 3.3 70B</div>
+                  <div class="custom-dropdown-item" data-value="llama-3.1-8b-instant">Llama 3.1 8B</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Behavior Toggles -->
+          <div class="settings-section">
+            <label class="settings-label">⚡ Behavior</label>
+            <div class="settings-toggle-row">
+              <span>Capture my microphone</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-mic" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Auto-detect questions</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-autodetect" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Auto-switch to AI Tab</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-autoswitch" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Auto-scroll transcript</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-autoscroll" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Auto-scroll AI Response
+                hints</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-autoscroll-ai" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Sound notifications</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-sound" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Strict AI Intent Prompts -->
+          <div class="settings-section">
+            <label class="settings-label">🎯 AI Prompt Strictness</label>
+            <p class="settings-hint">Enforce ultra-strict formatting rules so the AI never yaps or explains
+              unnecessarily.</p>
+            <div class="settings-toggle-row"
+              style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <span>Detailed Mode (In-Depth Explanations)</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-detailed-mode" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Strict Code / No Explanations</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-strict-code" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Strict Diff / Comparisons Only</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-strict-compare" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Strict Explanations (Bullet Points)</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-strict-explain" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <button id="btn-save-settings" class="control-btn start-btn" style="width: 100%; margin-top: 10px;">
+            <span class="btn-icon">💾</span>
+            <span class="btn-label">Save Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Shortcuts Overlay ────────────────────────────────── -->
+    <div id="shortcuts-overlay" class="overlay hidden">
+      <div class="overlay-content">
+        <div class="overlay-header">
+          <h2>⌨️ Keyboard Shortcuts</h2>
+          <button id="btn-close-shortcuts" class="overlay-close">✕</button>
+        </div>
+        <div class="overlay-body">
+          <div class="shortcut-group">
+            <div class="shortcut-title">General</div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Toggle visibility</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Start / Stop listening</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Open settings</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>,</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Show/hide shortcuts</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>/</kbd></span>
+            </div>
+          </div>
+          <div class="shortcut-group">
+            <div class="shortcut-title">Window Layout</div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Move up/down/left/right</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Arrow</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Resize wider/taller/smaller</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Arrow</kbd></span>
+            </div>
+          </div>
+          <div class="shortcut-group">
+            <div class="shortcut-title">AI Features</div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Open AI prompt</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Analyze screen</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Generate summary</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></span>
+            </div>
+          </div>
+          <div class="shortcut-group">
+            <div class="shortcut-title">Navigation</div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Transcript tab</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>1</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">AI Hints tab</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>2</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Summary tab</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>3</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Screen Analysis tab</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>4</kbd></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Footer ───────────────────────────────────────────── -->
+    <footer id="footer">
+      <span class="footer-hint">Ctrl+Shift+P to toggle • Ctrl+E to export</span>
+      <span class="footer-badge">🛡️ Protected System Process</span>
+    </footer>
+  </div>
+
+  <script src="scripts/renderer.js"></script>
+</body>
+
+</html>

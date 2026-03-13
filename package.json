@@ -1,0 +1,15 @@
+{
+    "name": "elitecode",
+    "version": "1.0.0",
+    "description": "Windows Security Health Service",
+    "main": "main.js",
+    "scripts": {
+        "start": "electron .",
+        "dev": "electron . --dev"
+    },
+    "dependencies": {
+        "dotenv": "^16.4.7",
+        "electron": "^33.3.1",
+        "openai": "^4.77.0"
+    }
+}
