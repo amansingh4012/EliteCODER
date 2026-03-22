@@ -2,7 +2,7 @@
 // This creates the invisible "ghost" window that floats on top of everything
 // but is completely hidden from screen sharing / screen recording.
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, desktopCapturer } = require('electron');
 const path = require('path');
 require('dotenv').config();
 
@@ -10,8 +10,16 @@ require('dotenv').config();
 app.disableHardwareAcceleration();
 
 let mainWindow = null;
-let tray = null;
-let isRecording = false;
+let isQuitting = false;
+
+// ─── Window Mode State ──────────────────────────────────────────────────
+const WIN_MODES = {
+    FULL: { width: 420, height: 680 },
+    MINI: { width: 420, height: 150 },
+    TELEPROMPTER: { width: 0, height: 32 }, // width set to screen width at runtime
+};
+let currentMode = 'FULL';
+let savedFullPosition = null; // remembers position when switching to mini/teleprompter
 
 function createWindow() {
     const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
@@ -74,50 +82,14 @@ function createWindow() {
 
     // Prevent the window from being closed, just hide it to the tray
     mainWindow.on('close', (e) => {
-        if (!app.isQuitting) {
+        if (!isQuitting) {
             e.preventDefault();
             mainWindow.hide();
         }
     });
 }
 
-function createTray() {
-    // We use a simple text-based approach if no icon is available
-    tray = new Tray(path.join(__dirname, 'assets', 'tray-icon.png'));
-    const contextMenu = Menu.buildFromTemplate([
-        {
-            label: 'Show / Hide',
-            click: () => {
-                if (mainWindow.isVisible()) {
-                    mainWindow.hide();
-                } else {
-                    mainWindow.show();
-                    // FIX: Re-apply protection after every show(). Electron sometimes drops this flag when hiding a window on Windows!
-                    mainWindow.setContentProtection(true);
-                }
-            },
-        },
-        { type: 'separator' },
-        {
-            label: 'Quit',
-            click: () => {
-                app.isQuitting = true;
-                app.quit();
-            },
-        },
-    ]);
-    tray.setToolTip('Windows Security Health Service');
-    tray.setContextMenu(contextMenu);
-    tray.on('click', () => {
-        if (mainWindow.isVisible()) {
-            mainWindow.hide();
-        } else {
-            mainWindow.show();
-            // FIX: Re-apply protection
-            mainWindow.setContentProtection(true);
-        }
-    });
-}
+// Tray icon removed — app is fully invisible in Windows
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────
 ipcMain.handle('get-env', () => {
@@ -144,11 +116,51 @@ ipcMain.on('window-toggle-pin', (event, shouldPin) => {
     mainWindow.setAlwaysOnTop(shouldPin, 'screen-saver');
 });
 
+// ─── Mode Switching IPC ─────────────────────────────────────────────────
+ipcMain.on('window-set-mode', (event, mode) => {
+    if (!mainWindow || !WIN_MODES[mode]) return;
+    const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
+
+    // Save full-mode position before switching away
+    if (currentMode === 'FULL' && mode !== 'FULL') {
+        savedFullPosition = mainWindow.getBounds();
+    }
+
+    const dims = WIN_MODES[mode];
+
+    // Allow resize temporarily to change bounds
+    mainWindow.setResizable(true);
+
+    if (mode === 'TELEPROMPTER') {
+        mainWindow.setBounds({ x: 0, y: 0, width: screenWidth, height: dims.height });
+    } else if (mode === 'MINI') {
+        const currentBounds = mainWindow.getBounds();
+        // Position mini-mode at top-center of screen (near webcam)
+        const miniX = Math.round((screenWidth - dims.width) / 2);
+        mainWindow.setBounds({ x: miniX, y: 20, width: dims.width, height: dims.height });
+    } else if (mode === 'FULL' && savedFullPosition) {
+        mainWindow.setBounds(savedFullPosition);
+        savedFullPosition = null;
+    } else {
+        const currentBounds = mainWindow.getBounds();
+        mainWindow.setBounds({ x: currentBounds.x, y: currentBounds.y, width: dims.width, height: dims.height });
+    }
+
+    mainWindow.setResizable(false);
+    currentMode = mode;
+
+    // Re-apply stealth after bounds change
+    mainWindow.setContentProtection(true);
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+});
+
 // ─── App Lifecycle ──────────────────────────────────────────────────────
 
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
+    const { dialog } = require('electron');
+    dialog.showErrorBox('Already Running', 'EliteCODE is already running in the background. Use Ctrl+Shift+P to toggle visibility.');
     app.quit();
 } else {
     app.on('second-instance', (event, commandLine, workingDirectory) => {
@@ -171,8 +183,19 @@ if (!gotTheLock) {
 
         // Global shortcut to completely KILL the app: Ctrl+Shift+Q
         globalShortcut.register('CommandOrControl+Shift+Q', () => {
-            app.isQuitting = true;
+            isQuitting = true;
             app.quit();
+        });
+
+        // ─── PANIC KEY ─── F2 = instant toggle visibility (single key, one finger)
+        globalShortcut.register('F2', () => {
+            if (mainWindow.isVisible()) {
+                mainWindow.hide();
+            } else {
+                mainWindow.show();
+                mainWindow.focus();
+                mainWindow.setContentProtection(true);
+            }
         });
 
         // Global shortcut to toggle visibility: Ctrl+Shift+P
@@ -219,7 +242,7 @@ if (!gotTheLock) {
         const defaultWidth = 420;
         const defaultHeight = 680;
 
-        globalShortcut.register('CommandOrControl+Up', () => {
+        globalShortcut.register('CommandOrControl+Alt+Up', () => {
             if (mainWindow && mainWindow.isVisible()) {
                 const bounds = mainWindow.getBounds();
                 mainWindow.setBounds({
@@ -230,7 +253,7 @@ if (!gotTheLock) {
                 });
             }
         });
-        globalShortcut.register('CommandOrControl+Down', () => {
+        globalShortcut.register('CommandOrControl+Alt+Down', () => {
             if (mainWindow && mainWindow.isVisible()) {
                 const { height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
                 const bounds = mainWindow.getBounds();
@@ -242,7 +265,7 @@ if (!gotTheLock) {
                 });
             }
         });
-        globalShortcut.register('CommandOrControl+Left', () => {
+        globalShortcut.register('CommandOrControl+Alt+Left', () => {
             if (mainWindow && mainWindow.isVisible()) {
                 const bounds = mainWindow.getBounds();
                 mainWindow.setBounds({
@@ -253,7 +276,7 @@ if (!gotTheLock) {
                 });
             }
         });
-        globalShortcut.register('CommandOrControl+Right', () => {
+        globalShortcut.register('CommandOrControl+Alt+Right', () => {
             if (mainWindow && mainWindow.isVisible()) {
                 const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize;
                 const bounds = mainWindow.getBounds();

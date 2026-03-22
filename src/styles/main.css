@@ -1450,3 +1450,166 @@ kbd {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
 }
+
+/* ═══════════════════════════════════════════════════
+   MINI-MODE PANEL
+   ═══════════════════════════════════════════════════ */
+#mini-answer-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  padding: 8px 12px;
+  overflow: hidden;
+  z-index: 100;
+}
+
+#mini-answer-panel.hidden {
+  display: none;
+}
+
+.mini-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+.mini-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+
+.mini-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.mini-btn {
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.mini-btn:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  transform: scale(1.05);
+}
+
+.mini-answer-text {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  -webkit-app-region: no-drag;
+}
+
+.mini-answer-text::-webkit-scrollbar {
+  width: 3px;
+}
+
+.mini-answer-text::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+/* ═══════════════════════════════════════════════════
+   TELEPROMPTER BAR
+   ═══════════════════════════════════════════════════ */
+#teleprompter-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  z-index: 100;
+  padding: 0 12px;
+}
+
+#teleprompter-bar.hidden {
+  display: none;
+}
+
+.teleprompter-scroll {
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 500;
+  color: #e0f0ff;
+  letter-spacing: 0.3px;
+  will-change: transform;
+  animation: teleprompterScroll 20s linear infinite;
+}
+
+@keyframes teleprompterScroll {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+/* ═══════════════════════════════════════════════════
+   CLICK-TO-COPY ON AI ANSWERS
+   ═══════════════════════════════════════════════════ */
+.ai-item-answer {
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.ai-item-answer:hover {
+  background: rgba(99, 102, 241, 0.06);
+  border-radius: var(--radius-sm);
+}
+
+.ai-item-answer:active {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+/* ═══════════════════════════════════════════════════
+   ANSWER-FIRST FORMATTING (first line is the key answer)
+   ═══════════════════════════════════════════════════ */
+.ai-item-answer strong:first-child,
+.ai-item-answer > p:first-child > strong:first-child {
+  font-size: 14px;
+  color: var(--accent-light, #a5b4fc);
+  display: block;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+/* ═══════════════════════════════════════════════════
+   STAR METHOD SECTIONS (Behavioral Questions)
+   ═══════════════════════════════════════════════════ */
+.ai-item-answer strong {
+  color: var(--accent-light, #a5b4fc);
+}
+
+/* ═══════════════════════════════════════════════════
+   AUTO-SCREEN WATCH BADGE
+   ═══════════════════════════════════════════════════ */
+.screen-item-label {
+  font-weight: 600;
+}
+
+.screen-item-preview {
+  border-radius: var(--radius-sm);
+  margin: 6px 0;
+  opacity: 0.8;
+  max-width: 100%;
+}

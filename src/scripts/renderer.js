@@ -14,9 +14,11 @@
     deepgramSocket: null,
     mediaStream: null,
     mediaRecorder: null,
+    mixerAudioContext: null,
     audioContext: null,
     analyserNode: null,
     animationFrameId: null,
+    deepgramKeepAliveInterval: null,
     transcript: [],
     aiResponses: [],
     envKeys: { DEEPGRAM_API_KEY: '', GEMINI_API_KEY: '', GROQ_API_KEY: '' },
@@ -28,6 +30,13 @@
     sessionTimerInterval: null,
     sessionStartTime: null,
     activeTab: 'transcript',
+    // ─── New Feature State ───
+    windowMode: 'FULL',                // 'FULL' | 'MINI' | 'TELEPROMPTER'
+    conversationHistory: [],            // last N Q&A pairs for follow-up context
+    latestAIAnswer: '',                 // cached for mini-mode display
+    autoScreenWatchInterval: null,      // 15s screen capture interval
+    lastScreenHash: '',                 // to detect screen content changes
+    lastQuestionType: 'SHORT',          // AUTO-DETECTED: SHORT | CODE | DESIGN | BEHAVIORAL | IMPLEMENTATION
     // Settings
     settings: {
       resume: '',
@@ -44,7 +53,8 @@
       strictExplain: true,
       detailedMode: false,
       useScreenContext: false,
-      captureMic: true
+      captureMic: true,
+      autoScreenWatch: false
     },
   };
 
@@ -108,6 +118,15 @@
     toggleDetailedMode: $('#toggle-detailed-mode'),
     toggleMic: $('#toggle-mic'),
     toggleScreenContext: $('#toggle-screen-context'),
+    toggleAutoscreen: $('#toggle-autoscreen'),
+    // Mini-mode
+    miniAnswerPanel: $('#mini-answer-panel'),
+    miniAnswerContent: $('#mini-answer-content'),
+    btnMiniCopy: $('#btn-mini-copy'),
+    btnMiniExpand: $('#btn-mini-expand'),
+    // Teleprompter
+    teleprompterBar: $('#teleprompter-bar'),
+    teleprompterText: $('#teleprompter-text'),
   };
 
   // ─── Initialize ─────────────────────────────────────────────────
@@ -174,7 +193,7 @@
     // Opacity slider — use CSS filter instead of container opacity to avoid full window recomposition
     dom.opacitySlider.addEventListener('input', (e) => {
       const val = e.target.value / 100;
-      document.getElementById('app').style.filter = `opacity(${val})`;
+      document.getElementById('app').style.opacity = val;
     });
 
     // ── Custom Model Dropdown ──
@@ -190,21 +209,52 @@
         if (!item) return;
         const value = item.dataset.value;
         const label = item.textContent;
-        // Update trigger text
         dom.modelDropdownTrigger.textContent = label;
-        // Update selected state
         dom.modelDropdownList.querySelectorAll('.custom-dropdown-item').forEach(i => i.classList.remove('selected'));
         item.classList.add('selected');
-        // Update state
         state.settings.model = value;
-        // Close dropdown
         dom.modelDropdown.classList.remove('open');
       });
     }
-    // Close dropdown on outside click
     document.addEventListener('click', (e) => {
       if (dom.modelDropdown && !dom.modelDropdown.contains(e.target)) {
         dom.modelDropdown.classList.remove('open');
+      }
+    });
+
+    // ── Mini-Mode Controls ──
+    if (dom.btnMiniCopy) {
+      dom.btnMiniCopy.addEventListener('click', () => {
+        if (state.latestAIAnswer) {
+          navigator.clipboard.writeText(state.latestAIAnswer).then(() => showToast('Copied!', 'success'));
+        }
+      });
+    }
+    if (dom.btnMiniExpand) {
+      dom.btnMiniExpand.addEventListener('click', () => setWindowMode('FULL'));
+    }
+
+    // ── Auto Screen Watch Toggle ──
+    if (dom.toggleAutoscreen) {
+      dom.toggleAutoscreen.addEventListener('change', () => {
+        state.settings.autoScreenWatch = dom.toggleAutoscreen.checked;
+        saveSettings();
+        if (state.settings.autoScreenWatch) {
+          startAutoScreenWatch();
+        } else {
+          stopAutoScreenWatch();
+        }
+      });
+    }
+
+    // ── Click-to-copy on AI answers ──
+    dom.aiContent.addEventListener('click', (e) => {
+      const answerEl = e.target.closest('.ai-item-answer');
+      if (answerEl && !e.target.closest('.item-copy-btn')) {
+        const text = answerEl.innerText;
+        if (text) {
+          navigator.clipboard.writeText(text).then(() => showToast('Answer copied!', 'success'));
+        }
       }
     });
 
@@ -233,10 +283,13 @@
           e.preventDefault();
           captureAndAnalyzeScreen();
           break;
-        case 'M': // Generate summary
+        case 'M': // Toggle Mini-mode
           e.preventDefault();
-          switchTab('summary');
-          generateSummary();
+          setWindowMode(state.windowMode === 'MINI' ? 'FULL' : 'MINI');
+          break;
+        case 'T': // Toggle Teleprompter
+          e.preventDefault();
+          setWindowMode(state.windowMode === 'TELEPROMPTER' ? 'FULL' : 'TELEPROMPTER');
           break;
       }
     } else if (e.ctrlKey) {
@@ -283,7 +336,73 @@
     }
   }
 
-  // ─── Window Controls ────────────────────────────────────────────
+  // ─── Window Mode Switching ─────────────────────────────────────────
+  function setWindowMode(mode) {
+    state.windowMode = mode;
+    window.electronAPI.setWindowMode(mode);
+
+    const fullUI = [
+      '#titlebar', '#status-bar', '#audio-visualizer', '#controls',
+      '#tabs', '#panel-toolbar', '#panels', '#ai-input-bar', '#footer'
+    ];
+
+    if (mode === 'MINI') {
+      // Hide full UI, show mini panel
+      fullUI.forEach(sel => { const el = document.querySelector(sel); if (el) el.classList.add('hidden'); });
+      if (dom.teleprompterBar) dom.teleprompterBar.classList.add('hidden');
+      if (dom.miniAnswerPanel) {
+        dom.miniAnswerPanel.classList.remove('hidden');
+        // Show latest answer
+        if (state.latestAIAnswer && dom.miniAnswerContent) {
+          dom.miniAnswerContent.innerHTML = parseMarkdown(state.latestAIAnswer);
+        }
+      }
+      showToast('Mini-mode — Ctrl+Shift+M to expand', 'info');
+    } else if (mode === 'TELEPROMPTER') {
+      // Hide full UI, show teleprompter
+      fullUI.forEach(sel => { const el = document.querySelector(sel); if (el) el.classList.add('hidden'); });
+      if (dom.miniAnswerPanel) dom.miniAnswerPanel.classList.add('hidden');
+      if (dom.teleprompterBar) {
+        dom.teleprompterBar.classList.remove('hidden');
+        if (state.latestAIAnswer) {
+          startTeleprompterScroll(state.latestAIAnswer);
+        }
+      }
+      showToast('Teleprompter — Ctrl+Shift+T to exit', 'info');
+    } else {
+      // FULL mode — restore everything
+      fullUI.forEach(sel => {
+        const el = document.querySelector(sel);
+        if (el) {
+          // Don't unhide buttons that should remain hidden based on state
+          if (sel === '#ai-input-bar' && !state.isAIBarOpen) return;
+          if (sel === '#audio-visualizer' && !state.isListening) return;
+          el.classList.remove('hidden');
+        }
+      });
+      // Restore start/stop button state
+      dom.btnStart.classList.toggle('hidden', state.isListening);
+      dom.btnStop.classList.toggle('hidden', !state.isListening);
+      if (dom.miniAnswerPanel) dom.miniAnswerPanel.classList.add('hidden');
+      if (dom.teleprompterBar) dom.teleprompterBar.classList.add('hidden');
+    }
+  }
+
+  // ─── Teleprompter Scrolling ───────────────────────────────────────
+  function startTeleprompterScroll(text) {
+    if (!dom.teleprompterText) return;
+    // Strip markdown, show plain text
+    const plainText = text.replace(/[*#`_~]/g, '').replace(/\n+/g, '  •  ');
+    dom.teleprompterText.textContent = plainText;
+    // Reset scroll animation
+    dom.teleprompterText.style.animation = 'none';
+    dom.teleprompterText.offsetHeight; // force reflow
+    // Calculate duration based on text length (~40 chars per second reading speed)
+    const duration = Math.max(10, Math.round(plainText.length / 40));
+    dom.teleprompterText.style.animation = `teleprompterScroll ${duration}s linear infinite`;
+  }
+
+  // ─── Window Controls ──────────────────────────────────────────
   function togglePin() {
     state.isPinned = !state.isPinned;
     window.electronAPI.togglePin(state.isPinned);
@@ -361,10 +480,16 @@
     if (dom.toggleStrictExplain) dom.toggleStrictExplain.checked = state.settings.strictExplain ?? true;
     if (dom.toggleDetailedMode) dom.toggleDetailedMode.checked = state.settings.detailedMode ?? false;
     if (dom.toggleScreenContext) dom.toggleScreenContext.checked = state.settings.useScreenContext ?? false;
+    if (dom.toggleAutoscreen) dom.toggleAutoscreen.checked = state.settings.autoScreenWatch ?? false;
 
     if (dom.toggleMic) dom.toggleMic.checked = state.settings.captureMic ?? true;
 
     dom.toggleSound.checked = state.settings.soundNotifications;
+
+    // Start auto screen watch if setting was saved as enabled
+    if (state.settings.autoScreenWatch) {
+      startAutoScreenWatch();
+    }
   }
 
   function saveSettings() {
@@ -381,6 +506,7 @@
     if (dom.toggleStrictExplain) state.settings.strictExplain = dom.toggleStrictExplain.checked;
     if (dom.toggleDetailedMode) state.settings.detailedMode = dom.toggleDetailedMode.checked;
     if (dom.toggleScreenContext) state.settings.useScreenContext = dom.toggleScreenContext.checked;
+    if (dom.toggleAutoscreen) state.settings.autoScreenWatch = dom.toggleAutoscreen.checked;
     if (dom.toggleMic) state.settings.captureMic = dom.toggleMic.checked;
     state.settings.soundNotifications = dom.toggleSound.checked;
 
@@ -508,11 +634,11 @@
       }
 
       if (micStream && desktopStream) {
-        // We have both, mix them
-        const audioContext = new AudioContext();
-        const dest = audioContext.createMediaStreamDestination();
-        audioContext.createMediaStreamSource(micStream).connect(dest);
-        audioContext.createMediaStreamSource(new MediaStream(desktopStream.getAudioTracks())).connect(dest);
+        // We have both, mix them — store the context so we can close it on stop
+        state.mixerAudioContext = new AudioContext();
+        const dest = state.mixerAudioContext.createMediaStreamDestination();
+        state.mixerAudioContext.createMediaStreamSource(micStream).connect(dest);
+        state.mixerAudioContext.createMediaStreamSource(new MediaStream(desktopStream.getAudioTracks())).connect(dest);
         state.mediaStream = dest.stream;
       } else {
         // We only have one of them
@@ -550,6 +676,16 @@
       state.mediaStream.getTracks().forEach(t => t.stop());
       state.mediaStream = null;
     }
+    // Close the mixer AudioContext to prevent memory leak
+    if (state.mixerAudioContext) {
+      state.mixerAudioContext.close();
+      state.mixerAudioContext = null;
+    }
+    // Clear Deepgram keep-alive
+    if (state.deepgramKeepAliveInterval) {
+      clearInterval(state.deepgramKeepAliveInterval);
+      state.deepgramKeepAliveInterval = null;
+    }
     if (state.deepgramSocket) {
       state.deepgramSocket.onclose = null;
       state.deepgramSocket.onerror = null;
@@ -567,6 +703,12 @@
     if (state.demoInterval) {
       clearInterval(state.demoInterval);
       state.demoInterval = null;
+    }
+    // Clear pending question state
+    state.pendingQuestion = null;
+    if (state.questionDebounce) {
+      clearTimeout(state.questionDebounce);
+      state.questionDebounce = null;
     }
 
     dom.btnStop.classList.add('hidden');
@@ -643,6 +785,13 @@
       setStatus('listening', 'Live transcription active');
       showToast('Deepgram connected', 'success');
       startAudioStream(socket);
+
+      // Send keep-alive every 10s to prevent Deepgram from dropping the socket after 30s of silence
+      state.deepgramKeepAliveInterval = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'KeepAlive' }));
+        }
+      }, 10000);
     };
 
     socket.onmessage = (event) => {
@@ -665,35 +814,63 @@
 
         if (isFinal) {
           addTranscriptItem(speaker, text);
-          state.transcriptForAI += `${speaker}: ${text}\n`;
+          // NOTE: transcriptForAI is already appended inside addTranscriptItem(), no duplicate here
 
-          // Smart question detection — behavioral, technical, coding
-          // Require questions to be at least 4 words so we ignore "What?", "Excuse me?", "Can you repeat that?"
+          // ═══════════════════════════════════════════════════════════
+          // SMART QUESTION ACCUMULATION — Handles interviewer pauses
+          // ═══════════════════════════════════════════════════════════
+          // Problem: Interviewer says "Can you explain... [2s pause]... the difference between X and Y?"
+          // Old behavior: fires AI after 1.2s on "Can you explain" = half question
+          // New behavior: accumulate ALL text once question mode starts, use completeness heuristic
+
           const wordCount = text.trim().split(/\s+/).length;
-          const isQuestion = wordCount >= 4 && (text.includes('?') ||
-            /\b(tell me|describe|explain|how (do|would|did|could)|what (is|are|was|were|would)|why (do|did|would)|walk me|give me an example|have you ever)\b/i.test(text));
+          const isQuestionTrigger = wordCount >= 4 && (text.includes('?') ||
+            /\b(tell me|describe|explain|how (do|would|did|could)|what (is|are|was|were|would)|why (do|did|would)|walk me|give me an example|have you ever|can you|could you|write|implement|build|design|create|solve|find|calculate|optimize)\b/i.test(text));
 
           const hasAnyKey = state.envKeys.GEMINI_API_KEY || state.envKeys.VERTEX_API_KEY || state.envKeys.GROQ_API_KEY ||
             state.envKeys.OPENROUTER_API_KEY || state.envKeys.TOGETHER_API_KEY ||
             state.envKeys.MISTRAL_API_KEY || state.envKeys.COHERE_API_KEY;
 
-          if (isQuestion && state.settings.autoDetect && hasAnyKey) {
+          if (state.pendingQuestion) {
+            // ALREADY in accumulation mode — append EVERYTHING (don't replace)
+            const combined = state.pendingQuestion + ' ' + text;
+            state.pendingQuestion = combined.length > 800 ? combined.slice(0, 800) : combined;
+            state.lastQuestionType = classifyQuestion(state.pendingQuestion);
+          } else if (isQuestionTrigger && state.settings.autoDetect && hasAnyKey) {
+            // NEW question detected — start accumulation mode
             state.pendingQuestion = text;
-          } else if (state.pendingQuestion) {
-            // Append subsequent context if they keep talking after a question
-            state.pendingQuestion += ' ' + text;
+            state.lastQuestionType = classifyQuestion(text);
           }
         } else {
           updatePartialTranscript(text);
         }
 
-        // Delay the AI hint until the speaker fully pauses for 1.2 seconds 
+        // ─── Smart Debounce with Completeness Heuristic ───
+        // Short pause (2.5s) → check if question is complete → fire or extend to 4.5s
         if (state.pendingQuestion && state.settings.autoDetect) {
           clearTimeout(state.questionDebounce);
+
+          const shortDelay = 1500;  // first check after 1.5s of silence
+          const longDelay = 3000;   // max wait if question looks incomplete
+
           state.questionDebounce = setTimeout(() => {
-            autoGenerateHint(state.pendingQuestion);
-            state.pendingQuestion = null;
-          }, 1200);
+            const q = state.pendingQuestion;
+            if (!q) return;
+
+            if (looksComplete(q)) {
+              // Question looks finished — fire AI now
+              autoGenerateHint(q);
+              state.pendingQuestion = null;
+            } else {
+              // Question looks incomplete (mid-sentence) — wait a bit more
+              state.questionDebounce = setTimeout(() => {
+                if (state.pendingQuestion) {
+                  autoGenerateHint(state.pendingQuestion);
+                  state.pendingQuestion = null;
+                }
+              }, longDelay - shortDelay);
+            }
+          }, shortDelay);
         }
       }
     };
@@ -719,9 +896,15 @@
   function startAudioStream(socket) {
     if (!state.mediaStream) return;
 
-    const mediaRecorder = new MediaRecorder(state.mediaStream, {
-      mimeType: 'audio/webm;codecs=opus',
-    });
+    // Check MIME type support and fallback gracefully
+    const preferredMime = 'audio/webm;codecs=opus';
+    const fallbackMime = 'audio/webm';
+    const mimeType = MediaRecorder.isTypeSupported(preferredMime) ? preferredMime
+      : MediaRecorder.isTypeSupported(fallbackMime) ? fallbackMime
+      : undefined; // let browser pick default
+
+    const recorderOptions = mimeType ? { mimeType } : {};
+    const mediaRecorder = new MediaRecorder(state.mediaStream, recorderOptions);
     state.mediaRecorder = mediaRecorder;
 
     mediaRecorder.ondataavailable = (event) => {
@@ -801,21 +984,34 @@
         return;
       }
 
+      // Pick the primary screen source, but skip our own window to avoid self-capture
+      const screenSource = sources.find(s => s.name === 'Entire Screen' || s.name === 'Screen 1' || s.id.startsWith('screen:'))
+        || sources.find(s => !s.name.includes('Security Health') && !s.name.includes('EliteCODE'))
+        || sources[0];
+
       // Capture via desktopCapturer
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           mandatory: {
             chromeMediaSource: 'desktop',
-            chromeMediaSourceId: sources[0].id,
+            chromeMediaSourceId: screenSource.id,
           },
         },
       });
 
-      // Grab a frame
+      // Grab a frame with proper cleanup
       const video = document.createElement('video');
       video.srcObject = stream;
-      await video.play();
+      try {
+        await video.play();
+      } catch (playErr) {
+        stream.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+        showToast('Could not capture screen frame', 'error');
+        dom.btnScreen.classList.remove('active');
+        return;
+      }
 
       // Resize to max 1024px to keep under API limits
       const maxWidth = 1024;
@@ -826,8 +1022,9 @@
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Stop the stream
+      // Stop the stream and release the video element
       stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
 
@@ -893,24 +1090,113 @@
 
   async function analyzeScreenWithAI(imageDataUrl, outputEl) {
     try {
-      const context = buildSystemPrompt(false); // Do not include the audio transcript
-      const userPrompt = `You are a system security analyzer interpreting user screen activity. ${context}\n\nAnalyze this screen capture carefully. If you see:\n- A CODING PROBLEM: Provide the solution with explanation and time/space complexity\n- A SYSTEM DESIGN diagram: Explain the architecture and suggest improvements\n- A PRESENTATION/DOCUMENT: Summarize key points and suggest talking points\n- A VIDEO CALL: Identify what's being discussed and provide relevant insights\n\nBe thorough and specific in your analysis.`;
+      const systemPrompt = `You are a friendly senior developer helping a FRESHER candidate in a live coding interview. The candidate is a beginner — your answer must be easy for them to understand and explain confidently.
+
+CRITICAL RULES:
+1. If you see a CODING PROBLEM:
+   - FIRST write "**🧠 Thinking out loud:**" followed by a natural, conversational thought process — as if the candidate is working through the problem live. Write in first person like:
+     "Okay so first I'm going to take the input array. The problem is asking me to find two numbers that add up to the target. So what if I use a hashmap? For each number, I'll check if the complement exists in the map. If yes, I found my answer. If not, I'll store the current number. That way I only need one pass."
+     This should sound like natural thinking, NOT a formal explanation. Use phrases like "okay so", "what if I", "let me think", "so basically", "that means I need to".
+   - THEN provide the COMPLETE SOLUTION in a clean code block
+   - CODE FORMATTING RULES:
+     • Use clear, descriptive variable names (not i, j, k — use left, right, currentSum, etc.)
+     • Add a blank line between logical sections of code
+     • Add short inline comments on tricky lines
+     • Use consistent indentation (2 spaces)
+     • Keep each line short and readable
+   - After the code, write "**Complexity:** Time: O(...) | Space: O(...)"
+   - Finally write "**💬 What to say after coding:**" with 1-2 sentences to wrap up, like "So the key idea is I'm trading space for time by using the hashmap."
+
+2. If you see a SYSTEM DESIGN diagram:
+   - Explain in simple terms what each component does
+   - Suggest improvements the candidate can mention confidently
+
+3. If you see a DOCUMENT or PRESENTATION:
+   - Pull out key talking points as bullet points
+
+NEVER just describe what you see. Always SOLVE it. Write like you're coaching a nervous fresher through their first interview.`;
+
+      const userPrompt = state.settings.resume
+        ? `Analyze this screen and help me solve it. I'm a fresher. My background: ${state.settings.resume.slice(0, 300)}`
+        : `Analyze this screen capture and solve whatever coding problem or question is shown. I'm a fresher, so explain simply.`;
 
       outputEl.innerHTML = '';
-      const responseText = await callLLM(null, userPrompt, 1500, imageDataUrl, (currentText) => {
+      const responseText = await callLLM(systemPrompt, userPrompt, 2000, imageDataUrl, (currentText) => {
         typeText(outputEl, currentText, 0, true);
       });
       state.lastScreenAnalysisText = responseText;
+
+      // Cache for mini-mode / teleprompter / follow-up
+      state.latestAIAnswer = responseText;
+      state.conversationHistory.push({ question: '[Screen Capture Analysis]', answer: responseText });
+      if (state.conversationHistory.length > 5) state.conversationHistory.shift();
+
+      if (state.windowMode === 'MINI' && dom.miniAnswerContent) {
+        dom.miniAnswerContent.innerHTML = parseMarkdown(responseText);
+      }
+      if (state.windowMode === 'TELEPROMPTER') {
+        startTeleprompterScroll(responseText);
+      }
     } catch (err) {
       outputEl.innerHTML = `<span style="color: var(--danger)">Error: ${escapeHTML(err.message)}<br><small>Note: You may be using a model that does not natively support Vision/Image requests. Please pick a Vision model from OpenRouter or Gemini.</small></span>`;
     }
   }
 
-  // ─── AI Integration (Google Gemini) ─────────────────────────────
-  function buildSystemPrompt(includeTranscript = true) {
+  // ─── AI Integration ───────────────────────────────────────────
+  const BEHAVIORAL_PATTERNS = /\b(tell me about a time|give me an example|describe a situation|walk me through|have you ever|share an experience|a challenge you faced|how did you handle|a time when you)\b/i;
+
+  function isBehavioralQuestion(text) {
+    return BEHAVIORAL_PATTERNS.test(text);
+  }
+
+  // ─── Question Type Classifier ──────────────────────────────────
+  function classifyQuestion(text) {
+    const lower = text.toLowerCase();
+
+    // BEHAVIORAL: STAR format
+    if (isBehavioralQuestion(text)) return 'BEHAVIORAL';
+
+    // CODE: write/solve/implement code, algorithms
+    if (/\b(write (a |the )?(code|function|program|algorithm|solution)|solve (this|the)|implement|code (for|to|this)|write (me )?a|leetcode|hackerrank|reverse|sort|search|binary|linked list|array|string|tree|graph|dp|dynamic programming|recursion|two pointer|sliding window)\b/i.test(lower)) {
+      return 'CODE';
+    }
+
+    // DESIGN: system design, architecture
+    if (/\b(design (a |the )?(system|architecture|database|api|microservice|service)|system design|scale|scalab|load balanc|caching|distributed|high availability|low latency)\b/i.test(lower)) {
+      return 'DESIGN';
+    }
+
+    // IMPLEMENTATION: build/create a feature, practical
+    if (/\b(build (a |the )?|create (a |the )?|make (a |the )?|develop|how would you (build|create|make|implement)|todo|crud|login|signup|dashboard|form|api endpoint)\b/i.test(lower)) {
+      return 'IMPLEMENTATION';
+    }
+
+    // SHORT: everything else (definitions, concepts, comparisons)
+    return 'SHORT';
+  }
+
+  function buildSystemPrompt(includeTranscript = true, question = '') {
     let prompt = "";
 
-    if (state.settings.detailedMode) {
+    // STAR mode for behavioral questions
+    if (question && isBehavioralQuestion(question)) {
+      prompt = `You are a real-time interview assistant. The user has been asked a BEHAVIORAL question. Format your answer using the STAR method:
+
+**Situation:** [Set the scene in 1-2 sentences]
+**Task:** [What was your responsibility]
+**Action:** [What you specifically did — this should be the longest section]
+**Result:** [Quantifiable outcome if possible]
+
+CRITICAL RULES:
+1. Write in first person as if the candidate is speaking.
+2. Sound natural and conversational, not robotic.
+3. Keep total response under 150 words.
+4. Start IMMEDIATELY with the Situation — no preamble.`;
+
+      if (state.settings.resume) {
+        prompt += `\n\nBase your story on this background:\n${state.settings.resume}`;
+      }
+    } else if (state.settings.detailedMode) {
       prompt = `You are a world-class Senior Software Engineer acting as a mentor in an interview. Your job is to provide incredibly comprehensive, deeply detailed, and perfectly formatted answers.
 CRITICAL RULES FOR DETAILED MODE:
 1. Break down the answer into structured, logical sections using markdown headings.
@@ -918,37 +1204,67 @@ CRITICAL RULES FOR DETAILED MODE:
 3. Use bolding to highlight key technical terms.
 4. Go far beyond a surface-level answer—be exhaustive and demonstrate deep mastery.`;
     } else {
-      prompt = `You are a real-time smart assistant for software engineering interviews. Your job is to provide EXACT, DIRECT answers that sound completely natural, exactly as a candidate would speak them out loud.
-CRITICAL RULES FOR INTERVIEW MODE:
-1. NO FLUFF. Start with the exact answer immediately. No "Here is the code" or "Certainly".
-2. Write in a conversational, spoken tone. Your text should look like a script for the candidate to read directly.
-3. Structure answers beautifully using bolding for emphasis.
-4. Keep the entire response extremely concise. The user is in a live interview and needs to read it fast.`;
+      // Detect question type for smart formatting
+      const qType = state.lastQuestionType || classifyQuestion(question);
 
-      // Dynamic Intent Strictness Formatting
-      if (state.settings.strictCode) {
-        prompt += `\n- IF ASKED FOR CODE: Output the code block. Below the code, write exactly 1-2 natural sentences of what the candidate should SAY OUT LOUD to explain the logic to the interviewer.`;
-      }
-      if (state.settings.strictCompare) {
-        prompt += `\n- IF ASKED FOR A DIFFERENCE/COMPARISON: Write a natural, spoken-style comparison that the candidate can read directly to the interviewer in 2-3 short bullet points. Do not include introductory filler.`;
-      }
-      if (state.settings.strictExplain) {
-        prompt += `\n- IF ASKED FOR AN EXPLANATION: Provide a conversational explanation that the candidate can naturally speak out loud. Limit to EXACTLY 2-3 short bullet points. Do not write lengthy paragraphs.`;
+      prompt = `You are a real-time smart assistant for software engineering interviews. The candidate is a FRESHER — your answers must be simple, clear, and easy to speak out loud.
+CRITICAL RULES:
+1. YOUR FIRST LINE MUST BE THE DIRECT ANSWER in bold. No preamble, no "Certainly", no "Great question". Just the answer.
+2. AFTER the direct answer, give a short real-world example or analogy if it helps understanding.
+3. Write in a conversational, spoken tone — like a fresher naturally explaining to an interviewer.
+4. Use simple words. Avoid jargon unless the question specifically uses it.
+5. Keep the entire response concise (under 120 words for short questions). The candidate needs to read it in 2-3 seconds.`;
+
+      // Dynamic formatting based on auto-detected question type
+      if (qType === 'CODE' || state.settings.strictCode) {
+        prompt += `\n\n💻 CODING QUESTION FORMAT:
+  1. "**🧠 Let me think through this:**" — Natural thought process (2-3 sentences). Sound like you're working through it: "Okay so I need to... what if I use..."
+  2. COMPLETE SOLUTION in a clean code block. Descriptive variable names. Blank lines between sections. Short inline comments.
+  3. "**Complexity:** Time: O(...) | Space: O(...)" 
+  4. "**💬 Say this:**" — 1 sentence wrap-up.`;
+      } else if (qType === 'DESIGN') {
+        prompt += `\n\n🏗️ SYSTEM DESIGN FORMAT:
+  1. Direct answer: what you would build (1 sentence bold)
+  2. Key components as bullet points (Database, API, Cache, etc.)
+  3. Trade-offs and scaling notes
+  4. "**💬 Say this:**" — 1 sentence summary`;
+      } else if (qType === 'IMPLEMENTATION') {
+        prompt += `\n\n🛠️ IMPLEMENTATION FORMAT:
+  1. Direct answer: the approach (1 sentence bold)
+  2. Step-by-step with small code snippets
+  3. "**💬 Say this:**" — Explain approach simply`;
+      } else {
+        // SHORT / default — answer first, then example
+        prompt += `\n\nFORMAT: **Direct answer** (1-2 sentences bold) → Then a brief example or analogy if helpful → Keep total under 100 words.`;
+        if (state.settings.strictCompare) {
+          prompt += `\n- FOR COMPARISONS: 2-3 bullet points. Key difference first in each.`;
+        }
+        if (state.settings.strictExplain) {
+          prompt += `\n- FOR EXPLANATIONS: 2-3 bullet points using simple analogies.`;
+        }
       }
     }
 
     if (state.settings.useScreenContext && state.lastScreenAnalysisText) {
-      prompt += `\n\n🖼️ PREVIOUS SCREEN CAPTURE ANALYSIS:\n${state.lastScreenAnalysisText}\n\nIMPORTANT: The user previously captured their screen and the AI analyzed it. The text above is the result of that analysis. If the user's question relates to a coding problem, diagram, or context visible on their screen, use this analysis to answer their question accurately.`;
+      prompt += `\n\n🖼️ PREVIOUS SCREEN CAPTURE ANALYSIS:\n${state.lastScreenAnalysisText}\n\nIMPORTANT: If the user's question relates to a coding problem, diagram, or context visible on their screen, use this analysis to answer accurately.`;
     }
 
     if (state.settings.resume) {
-      prompt += `\n\n💼 USER'S BACKGROUND/RESUME:\n${state.settings.resume}\n\nIMPORTANT: ONLY use or reference this resume if the question explicitly asks about the user's past projects, past experience, or resume. Otherwise, ignore it completely and answer the question universally.`;
+      prompt += `\n\n💼 CANDIDATE'S BACKGROUND:\n${state.settings.resume}\n\nALWAYS weave in relevant skills or experience from this background naturally into your answers. If the interviewer asks something out of the box or unexpected, still reference this background to make the answer sound authentic and personal.`;
     }
     if (state.settings.jobDescription) {
-      prompt += `\n\n🎯 TARGET JOB DESCRIPTION:\n${state.settings.jobDescription}\n\nIMPORTANT: Align answers with the key requirements, technologies, and values mentioned in this job description.`;
+      prompt += `\n\n🎯 TARGET JOB DESCRIPTION:\n${state.settings.jobDescription}\n\nIMPORTANT: Align answers with the key requirements mentioned in this job description.`;
     }
     if (state.settings.customInstructions) {
       prompt += `\n\n⚙️ CUSTOM INSTRUCTIONS:\n${state.settings.customInstructions}`;
+    }
+
+    // Follow-up context memory (last 5 Q&A pairs)
+    if (state.conversationHistory.length > 0) {
+      const historyText = state.conversationHistory
+        .map(h => `Q: ${h.question}\nA: ${h.answer.slice(0, 200)}...`)
+        .join('\n\n');
+      prompt += `\n\n💬 PREVIOUS Q&A IN THIS SESSION (for follow-up context):\n${historyText}\n\nIMPORTANT: If the current question is a follow-up (e.g. "Can you optimize that?", "What about edge cases?"), use the above context to give a coherent continuation.`;
     }
 
     if (includeTranscript) {
@@ -1015,10 +1331,9 @@ CRITICAL RULES FOR INTERVIEW MODE:
     }
 
     try {
-      const systemPrompt = buildSystemPrompt();
-      // Render formatted text efficiently
+      const systemPrompt = buildSystemPrompt(true, question);
       answerEl.innerHTML = '';
-      const responseText = await callLLM(systemPrompt, question, 1200, null, (currentText) => {
+      const responseText = await callLLM(systemPrompt, question, 800, null, (currentText) => {
         typeText(answerEl, currentText, 0, true);
       });
 
@@ -1026,6 +1341,21 @@ CRITICAL RULES FOR INTERVIEW MODE:
       dom.openaiStatus.classList.add('connected');
 
       state.aiResponses.push({ question, answer: responseText });
+
+      // ─── Follow-up memory: store last 5 Q&A pairs ───
+      state.conversationHistory.push({ question, answer: responseText });
+      if (state.conversationHistory.length > 5) {
+        state.conversationHistory.shift();
+      }
+
+      // ─── Cache for mini-mode and teleprompter ───
+      state.latestAIAnswer = responseText;
+      if (state.windowMode === 'MINI' && dom.miniAnswerContent) {
+        dom.miniAnswerContent.innerHTML = parseMarkdown(responseText);
+      }
+      if (state.windowMode === 'TELEPROMPTER') {
+        startTeleprompterScroll(responseText);
+      }
     } catch (err) {
       answerEl.innerHTML = `<span style="color: var(--danger)">Error: ${escapeHTML(err.message)}</span>`;
       dom.openaiStatus.textContent = '🤖 ✗';
@@ -1066,7 +1396,7 @@ CRITICAL RULES FOR INTERVIEW MODE:
 
       payload = {
         contents: contents,
-        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 },
       };
       parseResponse = (data) => data.candidates?.[0]?.content?.parts?.[0]?.text;
     }
@@ -1075,9 +1405,10 @@ CRITICAL RULES FOR INTERVIEW MODE:
       payload = {
         model: model,
         max_tokens: maxTokens,
-        temperature: 0.7,
+        temperature: 0.4,
         messages: []
       };
+      // Enable streaming — Cohere v2 uses `stream: true` the same way
       if (onChunk) payload.stream = true;
 
       if (systemPrompt) payload.messages.push({ role: 'system', content: systemPrompt });
@@ -1259,8 +1590,8 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
 
     item.innerHTML = `
       <div class="ai-item-header">
-        <span class="ai-item-label">${label}</span>
-        <span class="ai-item-time">${time}</span>
+        <span class="ai-item-label">${escapeHTML(label)}</span>
+        <span class="ai-item-time">${escapeHTML(time)}</span>
       </div>
       <div class="ai-item-question">${escapeHTML(question)}</div>
       <div class="ai-item-answer">
@@ -1337,11 +1668,13 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
 
   function parseMarkdown(text) {
     let html = escapeHTML(text);
-    html = html.replace(/```[a-z]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+    // Code blocks first — use non-greedy with length limit to prevent ReDoS
+    html = html.replace(/```[a-z]{0,20}\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
     html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-    html = html.replace(/`(.*?)`/g, '<code>$1</code>');
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    html = html.replace(/`([^`]+?)`/g, '<code>$1</code>');
+    // Bold before italic — use [^*] to prevent catastrophic backtracking
+    html = html.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');
     html = html.replace(/^### (.*$)/gm, '<h3>$1</h3>');
     html = html.replace(/^## (.*$)/gm, '<h2>$1</h2>');
     html = html.replace(/^# (.*$)/gm, '<h1>$1</h1>');
@@ -1532,11 +1865,147 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
     }, 3000);
   }
 
-  // ─── Utilities ──────────────────────────────────────────────────
+  // ─── Utilities ─────────────────────────────────────────────
   function escapeHTML(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (typeof str !== 'string') return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function looksComplete(text) {
+    if (!text) return false;
+    const trimmed = text.trim();
+    // Definitive end of sentence
+    if (trimmed.endsWith('?') || trimmed.endsWith('.')) return true;
+    
+    // Check if it ends with a word that implies more is coming
+    const words = trimmed.toLowerCase().split(/\s+/);
+    if (words.length === 0) return false;
+    const lastWord = words[words.length - 1];
+    
+    // Common conjunctions, prepositions, articles that indicate mid-sentence
+    const incompleteEndings = new Set([
+      'and', 'or', 'but', 'so', 'because', 'although', 'if', 'when',
+      'the', 'a', 'an', 'some', 'any',
+      'of', 'in', 'on', 'with', 'about', 'between', 'for', 'to', 'from',
+      'is', 'are', 'was', 'were', 'will', 'would', 'could', 'should',
+      'like', 'such', 'than', 'that', 'which', 'while', 'using', 'versus'
+    ]);
+    
+    return !incompleteEndings.has(lastWord);
+  }
+
+  function hasAnyAPIKey() {
+    return state.envKeys.GEMINI_API_KEY || state.envKeys.VERTEX_API_KEY || state.envKeys.GROQ_API_KEY ||
+      state.envKeys.OPENROUTER_API_KEY || state.envKeys.TOGETHER_API_KEY ||
+      state.envKeys.MISTRAL_API_KEY || state.envKeys.COHERE_API_KEY;
+  }
+
+  // ─── Auto Screen Watch (Feature 6) ─────────────────────────────
+  function startAutoScreenWatch() {
+    if (state.autoScreenWatchInterval) return; // already running
+    if (!hasAnyAPIKey()) {
+      showToast('Add an API key for auto-screen watch', 'warning');
+      return;
+    }
+
+    state.autoScreenWatchInterval = setInterval(async () => {
+      try {
+        const sources = await window.electronAPI.getDesktopSources();
+        if (!sources || sources.length === 0) return;
+
+        const screenSource = sources.find(s => s.id.startsWith('screen:') || s.name === 'Entire Screen')
+          || sources.find(s => !s.name.includes('Security Health') && !s.name.includes('EliteCODE'))
+          || sources[0];
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: screenSource.id } },
+        });
+
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        try { await video.play(); } catch { stream.getTracks().forEach(t => t.stop()); return; }
+
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 512 / video.videoWidth); // smaller for hash comparison
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        stream.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+
+        // Simple hash to detect content changes
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const hash = simpleImageHash(imageData);
+
+        if (hash === state.lastScreenHash) return; // no change
+        state.lastScreenHash = hash;
+
+        // Content changed — check if it's a coding problem
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+        const prompt = `Look at this screen capture. If you see a CODING PROBLEM (LeetCode, HackerRank, CodeSignal, etc.), solve it with optimal code, time/space complexity, and a 1-line verbal explanation. If it's NOT a coding problem, reply with exactly: SKIP`;
+
+        const response = await callLLM(null, prompt, 1500, dataUrl, null);
+        if (response && !response.trim().startsWith('SKIP')) {
+          // Found a coding problem! Show it
+          switchTab('screen-analysis');
+          clearEmptyState(dom.screenContent);
+          const item = document.createElement('div');
+          item.className = 'screen-item';
+          const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          item.innerHTML = `
+            <div class="screen-item-header">
+              <span class="screen-item-label">🔍 Auto-Detected Coding Problem</span>
+              <span class="screen-item-time">${escapeHTML(time)}</span>
+            </div>
+            <img class="screen-item-preview" src="${dataUrl}" alt="Auto-captured" style="max-height:80px;" />
+            <div class="screen-item-analysis">${parseMarkdown(response)}</div>
+          `;
+          dom.screenContent.appendChild(item);
+          dom.screenContent.scrollTop = dom.screenContent.scrollHeight;
+          state.lastScreenAnalysisText = response;
+          state.latestAIAnswer = response;
+          showToast('🔍 Coding problem detected on screen!', 'success');
+
+          // Update mini/teleprompter if in those modes
+          if (state.windowMode === 'MINI' && dom.miniAnswerContent) {
+            dom.miniAnswerContent.innerHTML = parseMarkdown(response);
+          }
+          if (state.windowMode === 'TELEPROMPTER') {
+            startTeleprompterScroll(response);
+          }
+        }
+      } catch (err) {
+        console.warn('Auto screen watch error:', err.message);
+      }
+    }, 15000); // every 15 seconds
+
+    showToast('Screen watch active — monitoring for coding problems', 'info');
+  }
+
+  function stopAutoScreenWatch() {
+    if (state.autoScreenWatchInterval) {
+      clearInterval(state.autoScreenWatchInterval);
+      state.autoScreenWatchInterval = null;
+    }
+  }
+
+  // Fast perceptual hash for detecting screen content changes
+  function simpleImageHash(imageData) {
+    const data = imageData.data;
+    let hash = 0;
+    // Sample every 400th pixel for speed
+    for (let i = 0; i < data.length; i += 400 * 4) {
+      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      hash = ((hash << 5) - hash + Math.round(gray)) | 0;
+    }
+    return hash.toString(36);
   }
 
   // ─── Start ──────────────────────────────────────────────────────

@@ -4,6 +4,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://*.googleapis.com https://api.deepgram.com wss://api.deepgram.com https://api.groq.com https://api.mistral.ai https://api.cohere.com https://api.together.xyz https://openrouter.ai; img-src 'self' data:;" />
   <title>System Health Service</title>
   <link rel="stylesheet" href="styles/main.css" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -143,6 +145,23 @@
       <button id="btn-send-ai" class="send-btn">➤</button>
     </div>
 
+    <!-- ─── Mini-Mode Answer Panel (shown only in mini-mode) ─── -->
+    <div id="mini-answer-panel" class="hidden">
+      <div class="mini-header">
+        <span class="mini-label">🧠 Latest Answer</span>
+        <div class="mini-controls">
+          <button id="btn-mini-copy" class="mini-btn" title="Copy">📋</button>
+          <button id="btn-mini-expand" class="mini-btn" title="Expand to Full">↗️</button>
+        </div>
+      </div>
+      <div id="mini-answer-content" class="mini-answer-text">No AI answer yet. Ask a question or wait for auto-detect.</div>
+    </div>
+
+    <!-- ─── Teleprompter Bar (shown only in teleprompter mode) ─── -->
+    <div id="teleprompter-bar" class="hidden">
+      <div id="teleprompter-text" class="teleprompter-scroll">Press Ctrl+Shift+T to exit teleprompter mode</div>
+    </div>
+
     <!-- ─── Settings Overlay ─────────────────────────────────── -->
     <div id="settings-overlay" class="overlay hidden">
       <div class="overlay-content">
@@ -237,10 +256,16 @@
               </label>
             </div>
             <div class="settings-toggle-row">
-              <span>Auto-scroll AI Response
-                hints</span>
+              <span>Auto-scroll AI Response hints</span>
               <label class="toggle">
                 <input type="checkbox" id="toggle-autoscroll-ai" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-toggle-row">
+              <span>Auto-watch screen for coding problems</span>
+              <label class="toggle">
+                <input type="checkbox" id="toggle-autoscreen" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -308,6 +333,10 @@
           <div class="shortcut-group">
             <div class="shortcut-title">General</div>
             <div class="shortcut-item">
+              <span class="shortcut-desc">🚨 Panic hide/show (one key!)</span>
+              <span class="shortcut-keys"><kbd>F2</kbd></span>
+            </div>
+            <div class="shortcut-item">
               <span class="shortcut-desc">Toggle visibility</span>
               <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></span>
             </div>
@@ -325,6 +354,17 @@
             </div>
           </div>
           <div class="shortcut-group">
+            <div class="shortcut-title">View Modes</div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Toggle Mini-mode</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">Toggle Teleprompter</span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>
+            </div>
+          </div>
+          <div class="shortcut-group">
             <div class="shortcut-title">Window Layout</div>
             <div class="shortcut-item">
               <span class="shortcut-desc">Move up/down/left/right</span>
@@ -332,7 +372,7 @@
             </div>
             <div class="shortcut-item">
               <span class="shortcut-desc">Resize wider/taller/smaller</span>
-              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Arrow</kbd></span>
+              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Arrow</kbd></span>
             </div>
           </div>
           <div class="shortcut-group">
@@ -347,7 +387,7 @@
             </div>
             <div class="shortcut-item">
               <span class="shortcut-desc">Generate summary</span>
-              <span class="shortcut-keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></span>
+              <span class="shortcut-keys">Ask AI → "summarize"</span>
             </div>
           </div>
           <div class="shortcut-group">

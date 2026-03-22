@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     closeWindow: () => ipcRenderer.send('window-close'),
     togglePin: (shouldPin) => ipcRenderer.send('window-toggle-pin', shouldPin),
     getDesktopSources: () => ipcRenderer.invoke('get-desktop-sources'),
+    setWindowMode: (mode) => ipcRenderer.send('window-set-mode', mode),
 });
