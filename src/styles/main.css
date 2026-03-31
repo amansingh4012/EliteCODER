@@ -407,6 +407,38 @@ body {
   color: var(--danger);
 }
 
+/* ─── Stealth Mode Badge ────────────────────────────────────────── */
+.stealth-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.stealth-badge.stealth-on {
+  background: linear-gradient(135deg, rgba(0, 212, 170, 0.25), rgba(91, 157, 255, 0.15));
+  color: #00ffcc;
+  border: 1px solid rgba(0, 255, 204, 0.3);
+  box-shadow: 0 0 12px rgba(0, 255, 204, 0.2), inset 0 0 8px rgba(0, 255, 204, 0.05);
+  animation: stealthPulse 2s ease-in-out infinite;
+}
+
+.stealth-badge.stealth-off {
+  background: rgba(255, 77, 106, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(255, 77, 106, 0.25);
+  box-shadow: none;
+  animation: none;
+}
+
+@keyframes stealthPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 255, 204, 0.15); }
+  50% { box-shadow: 0 0 16px rgba(0, 255, 204, 0.35), 0 0 4px rgba(0, 255, 204, 0.1); }
+}
+
 /* ─── Audio Visualizer ──────────────────────────────────────────── */
 #audio-visualizer {
   display: flex;

@@ -8,4 +8,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     togglePin: (shouldPin) => ipcRenderer.send('window-toggle-pin', shouldPin),
     getDesktopSources: () => ipcRenderer.invoke('get-desktop-sources'),
     setWindowMode: (mode) => ipcRenderer.send('window-set-mode', mode),
+    // ─── Stealth Mode ───
+    getStealthMode: () => ipcRenderer.invoke('get-stealth-mode'),
+    setStealthMode: (enabled) => ipcRenderer.send('set-stealth-mode', enabled),
+    onStealthModeChanged: (callback) => ipcRenderer.on('stealth-mode-changed', (event, enabled) => callback(enabled)),
+    // ─── Click-Through (Anti-Tab-Detect) ───
+    mouseEnterWindow: () => ipcRenderer.send('mouse-enter-window'),
+    mouseLeaveWindow: () => ipcRenderer.send('mouse-leave-window'),
 });

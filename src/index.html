@@ -36,6 +36,10 @@
         <span id="session-timer" class="session-timer hidden">00:00</span>
       </div>
       <div class="status-right">
+        <!-- ★ Stealth Mode Indicator -->
+        <span id="stealth-badge" class="stealth-badge stealth-on">
+          👻 STEALTH
+        </span>
         <div id="opacity-control" class="opacity-control">
           <span class="opacity-icon">◐</span>
           <input type="range" id="opacity-slider" min="30" max="100" value="92" class="opacity-slider" />
@@ -265,7 +269,7 @@
               </label>
             </div>
             <div class="settings-toggle-row">
-              <span>Auto-watch screen for coding problems</span>
+              <span>Auto-watch screen for questions</span>
               <label class="toggle">
                 <input type="checkbox" id="toggle-autoscreen" />
                 <span class="toggle-slider"></span>
@@ -337,6 +341,10 @@
             <div class="shortcut-item">
               <span class="shortcut-desc">🚨 Panic hide/show (one key!)</span>
               <span class="shortcut-keys"><kbd>F2</kbd></span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-desc">👻 Toggle Stealth Mode (anti-tab-detect)</span>
+              <span class="shortcut-keys"><kbd>F4</kbd></span>
             </div>
             <div class="shortcut-item">
               <span class="shortcut-desc">Toggle visibility</span>

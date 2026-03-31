@@ -36,6 +36,8 @@
     latestAIAnswer: '',                 // cached for mini-mode display
     autoScreenWatchInterval: null,      // 15s screen capture interval
     lastScreenHash: '',                 // to detect screen content changes
+    lastDetectedQuestion: '',           // extracted question text for dedup
+    autoScreenBusy: false,              // prevents overlapping auto-screen calls
     lastQuestionType: 'SHORT',          // AUTO-DETECTED: SHORT | CODE | DESIGN | BEHAVIORAL | IMPLEMENTATION
     // Settings
     settings: {
@@ -141,7 +143,44 @@
     updateAPIStatus();
     bindEvents();
     createAudioVisualizer();
+
+    // ★ ANTI-TAB-DETECT: Click-through mouse tracking.
+    // When cursor enters EliteCODE window → enable mouse events (allow interaction)
+    // When cursor leaves → re-enable click-through (clicks pass to browser)
+    // This works WITH focusable:false to ensure browser NEVER fires blur/visibilitychange
+    setupClickThroughTracking();
+
     showToast('Ready! Press Start to begin.', 'info');
+  }
+
+  // ─── Click-Through Mouse Tracking ─────────────────────────────────
+  function setupClickThroughTracking() {
+    let isInside = false;
+
+    document.addEventListener('mouseenter', () => {
+      if (!isInside) {
+        isInside = true;
+        window.electronAPI.mouseEnterWindow();
+      }
+    });
+
+    document.addEventListener('mouseleave', () => {
+      if (isInside) {
+        isInside = false;
+        window.electronAPI.mouseLeaveWindow();
+      }
+    });
+
+    // Listen for stealth mode changes to update the stealth badge
+    window.electronAPI.onStealthModeChanged((enabled) => {
+      const badge = document.getElementById('stealth-badge');
+      if (badge) {
+        badge.classList.toggle('stealth-on', enabled);
+        badge.classList.toggle('stealth-off', !enabled);
+        badge.textContent = enabled ? '👻 STEALTH' : '👁️ VISIBLE';
+        // ★ NO title attribute — native OS tooltips are detectable by proctoring tools
+      }
+    });
   }
 
   // ─── Event Bindings ─────────────────────────────────────────────
@@ -1090,10 +1129,11 @@
 
   async function analyzeScreenWithAI(imageDataUrl, outputEl) {
     try {
-      const systemPrompt = `You are a friendly senior developer helping a FRESHER candidate in a live coding interview. The candidate is a beginner — your answer must be easy for them to understand and explain confidently.
+      const systemPrompt = `You are a friendly senior developer helping a FRESHER candidate in a live interview. The candidate is a beginner — your answer must be easy for them to understand and explain confidently.
 
-CRITICAL RULES:
-1. If you see a CODING PROBLEM:
+CRITICAL RULES — Detect WHAT is on screen and respond accordingly:
+
+1. **CODING PROBLEM** (LeetCode, HackerRank, CodeSignal, or any coding challenge):
    - FIRST write "**🧠 Thinking out loud:**" followed by a natural, conversational thought process — as if the candidate is working through the problem live. Write in first person like:
      "Okay so first I'm going to take the input array. The problem is asking me to find two numbers that add up to the target. So what if I use a hashmap? For each number, I'll check if the complement exists in the map. If yes, I found my answer. If not, I'll store the current number. That way I only need one pass."
      This should sound like natural thinking, NOT a formal explanation. Use phrases like "okay so", "what if I", "let me think", "so basically", "that means I need to".
@@ -1105,16 +1145,37 @@ CRITICAL RULES:
      • Use consistent indentation (2 spaces)
      • Keep each line short and readable
    - After the code, write "**Complexity:** Time: O(...) | Space: O(...)"
-   - Finally write "**💬 What to say after coding:**" with 1-2 sentences to wrap up, like "So the key idea is I'm trading space for time by using the hashmap."
+   - Finally write "**💬 What to say after coding:**" with 1-2 sentences to wrap up.
 
-2. If you see a SYSTEM DESIGN diagram:
+2. **CONCEPTUAL / THEORY QUESTION** (e.g. "What is polymorphism?", "Explain REST vs GraphQL", asked in a chatbox, AI interviewer, or platform):
+   - Start with "**💡 Answer:**" followed by a clear, concise direct answer (2-3 sentences max).
+   - Add "**📌 Key Points:**" with 2-3 bullet points for depth.
+   - End with "**💬 Say this:**" — a natural, spoken-style sentence the candidate can say out loud.
+   - Keep total under 120 words. Sound conversational, not textbook.
+
+3. **CHATBOX / AI INTERVIEWER QUESTION** (question typed in chat, Zoom chat, Teams, Slack, or an AI interview platform):
+   - Treat the QUESTION TEXT in the chatbox as the interview question — answer it directly.
+   - Follow the same format as conceptual questions above unless it's a coding problem.
+   - If the chatbox contains a coding task, use the coding format from rule 1.
+
+4. **BEHAVIORAL QUESTION** (e.g. "Tell me about a time when...", "Describe a challenge you faced"):
+   - Use STAR format:
+     **Situation:** (1-2 sentences)
+     **Task:** (1 sentence)
+     **Action:** (2-3 sentences — the longest section)
+     **Result:** (1 sentence with a measurable outcome if possible)
+   - Write in first person. Sound natural.
+
+5. **SYSTEM DESIGN** diagram or question:
    - Explain in simple terms what each component does
    - Suggest improvements the candidate can mention confidently
+   - Format as bullet points with emoji labels
 
-3. If you see a DOCUMENT or PRESENTATION:
+6. **DOCUMENT or PRESENTATION**:
    - Pull out key talking points as bullet points
+   - Highlight anything the candidate should be prepared to discuss
 
-NEVER just describe what you see. Always SOLVE it. Write like you're coaching a nervous fresher through their first interview.`;
+NEVER just describe what you see. Always SOLVE or ANSWER it. Write like you're coaching a nervous fresher through their first interview.`;
 
       const userPrompt = state.settings.resume
         ? `Analyze this screen and help me solve it. I'm a fresher. My background: ${state.settings.resume.slice(0, 300)}`
@@ -1905,7 +1966,20 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
       state.envKeys.MISTRAL_API_KEY || state.envKeys.COHERE_API_KEY;
   }
 
-  // ─── Auto Screen Watch (Feature 6) ─────────────────────────────
+  // ─── Auto Screen Watch (Feature 6 — Universal Question Detection) ───────
+  //
+  // ARCHITECTURE (2-phase dedup pipeline):
+  //   Phase 0: Perceptual hash — if the screen pixels haven't changed at all, skip.
+  //   Phase 1: Cheap AI call — "Extract the question visible on screen" (~100 tokens).
+  //            If no question found → skip. If same question as last time → skip.
+  //   Phase 2: Full AI call — generate the complete answer using the existing
+  //            analyzeScreenWithAI() prompt (supports coding, design, behavioral, etc).
+  //
+  // This means:
+  //   ✓ Detects ANY question type (coding platforms, chatbox, AI interview, etc.)
+  //   ✓ Never re-answers the same question even if pixels change slightly
+  //   ✓ Cheap Phase-1 call saves API budget when screen hasn't changed meaningfully
+
   function startAutoScreenWatch() {
     if (state.autoScreenWatchInterval) return; // already running
     if (!hasAnyAPIKey()) {
@@ -1914,7 +1988,12 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
     }
 
     state.autoScreenWatchInterval = setInterval(async () => {
+      // Guard: don't overlap if a previous cycle is still in-flight
+      if (state.autoScreenBusy) return;
+      state.autoScreenBusy = true;
+
       try {
+        // ── Capture the screen ──────────────────────────────────────
         const sources = await window.electronAPI.getDesktopSources();
         if (!sources || sources.length === 0) return;
 
@@ -1932,7 +2011,7 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
         try { await video.play(); } catch { stream.getTracks().forEach(t => t.stop()); return; }
 
         const canvas = document.createElement('canvas');
-        const scale = Math.min(1, 512 / video.videoWidth); // smaller for hash comparison
+        const scale = Math.min(1, 768 / video.videoWidth);
         canvas.width = Math.round(video.videoWidth * scale);
         canvas.height = Math.round(video.videoHeight * scale);
         const ctx = canvas.getContext('2d');
@@ -1940,53 +2019,105 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
         stream.getTracks().forEach(t => t.stop());
         video.srcObject = null;
 
-        // Simple hash to detect content changes
+        // ── Phase 0: Perceptual hash — skip if screen is visually identical ──
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const hash = simpleImageHash(imageData);
+        const hash = perceptualImageHash(imageData);
 
-        if (hash === state.lastScreenHash) return; // no change
+        if (state.lastScreenHash && isScreenUnchanged(hash, state.lastScreenHash)) {
+          // Screen is truly unchanged — skip
+          return;
+        }
         state.lastScreenHash = hash;
 
-        // Content changed — check if it's a coding problem
         const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-        const prompt = `Look at this screen capture. If you see a CODING PROBLEM (LeetCode, HackerRank, CodeSignal, etc.), solve it with optimal code, time/space complexity, and a 1-line verbal explanation. If it's NOT a coding problem, reply with exactly: SKIP`;
 
-        const response = await callLLM(null, prompt, 1500, dataUrl, null);
-        if (response && !response.trim().startsWith('SKIP')) {
-          // Found a coding problem! Show it
-          switchTab('screen-analysis');
-          clearEmptyState(dom.screenContent);
-          const item = document.createElement('div');
-          item.className = 'screen-item';
-          const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-          item.innerHTML = `
-            <div class="screen-item-header">
-              <span class="screen-item-label">🔍 Auto-Detected Coding Problem</span>
-              <span class="screen-item-time">${escapeHTML(time)}</span>
-            </div>
-            <img class="screen-item-preview" src="${dataUrl}" alt="Auto-captured" style="max-height:80px;" />
-            <div class="screen-item-analysis">${parseMarkdown(response)}</div>
-          `;
-          dom.screenContent.appendChild(item);
-          dom.screenContent.scrollTop = dom.screenContent.scrollHeight;
-          state.lastScreenAnalysisText = response;
-          state.latestAIAnswer = response;
-          showToast('🔍 Coding problem detected on screen!', 'success');
+        // ── Phase 1: Cheap extraction — find the question on screen ──────
+        const extractionPrompt = `You are a screen content analyzer. Your ONLY job is to find and extract any QUESTION visible on this screen.
 
-          // Update mini/teleprompter if in those modes
-          if (state.windowMode === 'MINI' && dom.miniAnswerContent) {
-            dom.miniAnswerContent.innerHTML = parseMarkdown(response);
-          }
-          if (state.windowMode === 'TELEPROMPTER') {
-            startTeleprompterScroll(response);
-          }
+A question can appear anywhere:
+- A coding problem on LeetCode, HackerRank, CodeSignal, or any coding platform
+- A question typed in a chat window or chatbox (Zoom chat, Teams chat, Slack, Discord, etc.)
+- A question asked by an AI interviewer on any interview platform
+- A question visible in a document, presentation, or shared screen
+- A question displayed as a prompt or instruction on any website or application
+- A verbal question shown as captions or subtitles
+
+RULES:
+1. If you find a question, respond with ONLY the question text — nothing else. Extract it exactly as written.
+2. If there are multiple questions, extract the most prominent/recent one (usually the last or largest one).
+3. For coding problems, include the full problem statement (description + constraints + examples if visible).
+4. If there is NO question on screen, respond with exactly: NO_QUESTION
+5. Do NOT add commentary, explanation, or formatting. Just the raw question text.`;
+
+        const extractedQuestion = await callLLM(null, extractionPrompt, 300, dataUrl, null);
+
+        // No question found on screen → skip
+        if (!extractedQuestion || extractedQuestion.trim() === 'NO_QUESTION' || extractedQuestion.trim().length < 10) {
+          return;
         }
+
+        const cleanQuestion = extractedQuestion.trim();
+
+        // ── Dedup: Compare with previously detected question ─────────
+        if (state.lastDetectedQuestion && questionIsSame(state.lastDetectedQuestion, cleanQuestion)) {
+          // Same question as before — don't regenerate
+          return;
+        }
+
+        // It's a NEW question! Update the tracker
+        state.lastDetectedQuestion = cleanQuestion;
+
+        // ── Phase 2: Full answer generation ──────────────────────────
+        // Re-capture at higher quality for the full analysis
+        const hiResDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+
+        switchTab('screen-analysis');
+        clearEmptyState(dom.screenContent);
+
+        const item = document.createElement('div');
+        item.className = 'screen-item';
+        const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+        // Classify the detected question for the label
+        const qType = classifyQuestion(cleanQuestion);
+        const labelEmoji = qType === 'CODE' ? '💻' : qType === 'DESIGN' ? '🏗️' : qType === 'BEHAVIORAL' ? '🗣️' : qType === 'IMPLEMENTATION' ? '🛠️' : '❓';
+        const labelText = qType === 'CODE' ? 'Coding Problem' : qType === 'DESIGN' ? 'System Design' : qType === 'BEHAVIORAL' ? 'Behavioral Question' : qType === 'IMPLEMENTATION' ? 'Implementation Task' : 'Question Detected';
+
+        item.innerHTML = `
+          <div class="screen-item-header">
+            <span class="screen-item-label">🔍 Auto: ${labelEmoji} ${escapeHTML(labelText)}</span>
+            <span class="screen-item-time">${escapeHTML(time)}</span>
+          </div>
+          <img class="screen-item-preview" src="${hiResDataUrl}" alt="Auto-captured" style="max-height:80px;" />
+          <div class="screen-item-question" style="padding:6px 10px;font-size:12px;color:#a1a1aa;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <strong>Detected:</strong> ${escapeHTML(cleanQuestion.length > 200 ? cleanQuestion.slice(0, 200) + '…' : cleanQuestion)}
+          </div>
+          <div class="screen-item-analysis">
+            <span class="thinking">
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+            </span> Generating answer...
+          </div>
+        `;
+        dom.screenContent.appendChild(item);
+        dom.screenContent.scrollTop = dom.screenContent.scrollHeight;
+
+        const analysisEl = item.querySelector('.screen-item-analysis');
+
+        // Use the full analyzeScreenWithAI flow for the answer
+        await analyzeScreenWithAI(hiResDataUrl, analysisEl);
+
+        showToast(`🔍 ${labelEmoji} ${labelText} detected on screen!`, 'success');
+
       } catch (err) {
         console.warn('Auto screen watch error:', err.message);
+      } finally {
+        state.autoScreenBusy = false;
       }
-    }, 15000); // every 15 seconds
+    }, 4000); // every 4 seconds — Phase 0 hash filter keeps token cost low
 
-    showToast('Screen watch active — monitoring for coding problems', 'info');
+    showToast('👁️ Screen watch active — monitoring for any questions', 'info');
   }
 
   function stopAutoScreenWatch() {
@@ -1994,18 +2125,110 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
       clearInterval(state.autoScreenWatchInterval);
       state.autoScreenWatchInterval = null;
     }
+    state.autoScreenBusy = false;
   }
 
-  // Fast perceptual hash for detecting screen content changes
-  function simpleImageHash(imageData) {
-    const data = imageData.data;
-    let hash = 0;
-    // Sample every 400th pixel for speed
-    for (let i = 0; i < data.length; i += 400 * 4) {
-      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-      hash = ((hash << 5) - hash + Math.round(gray)) | 0;
+  // ─── Question Deduplication ─────────────────────────────────────────
+  // Normalized comparison: strips formatting, lowercases, compares tokens.
+  // If >75% of tokens overlap, we consider it the same question.
+  function questionIsSame(prevQuestion, newQuestion) {
+    const normalize = (text) => text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')   // strip punctuation
+      .replace(/\s+/g, ' ')           // collapse whitespace
+      .trim();
+
+    const prev = normalize(prevQuestion);
+    const next = normalize(newQuestion);
+
+    // Exact match (common case)
+    if (prev === next) return true;
+
+    // Token overlap — handles minor differences (extra whitespace, truncation, etc.)
+    const prevTokens = new Set(prev.split(' ').filter(t => t.length > 2));
+    const nextTokens = new Set(next.split(' ').filter(t => t.length > 2));
+
+    if (prevTokens.size === 0 || nextTokens.size === 0) return false;
+
+    let overlap = 0;
+    for (const token of nextTokens) {
+      if (prevTokens.has(token)) overlap++;
     }
-    return hash.toString(36);
+
+    const similarity = overlap / Math.max(prevTokens.size, nextTokens.size);
+    return similarity > 0.75;
+  }
+
+  // ─── Perceptual Image Hash (block-based) ────────────────────────────
+  // Divides the image into an 8x8 grid of blocks, computes average brightness
+  // per block. Returns a 64-element array that can be compared with cosine
+  // similarity. Much more robust than the old single-number hash.
+  function perceptualImageHash(imageData) {
+    const data = imageData.data;
+    const w = imageData.width;
+    const h = imageData.height;
+    const gridSize = 8;
+    const blockW = Math.floor(w / gridSize);
+    const blockH = Math.floor(h / gridSize);
+    const hash = new Float32Array(gridSize * gridSize);
+
+    for (let gy = 0; gy < gridSize; gy++) {
+      for (let gx = 0; gx < gridSize; gx++) {
+        let sum = 0;
+        let count = 0;
+        const startX = gx * blockW;
+        const startY = gy * blockH;
+        // Sample every 4th pixel in the block for speed
+        for (let y = startY; y < startY + blockH; y += 4) {
+          for (let x = startX; x < startX + blockW; x += 4) {
+            const idx = (y * w + x) * 4;
+            if (idx < data.length - 2) {
+              sum += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+              count++;
+            }
+          }
+        }
+        hash[gy * gridSize + gx] = count > 0 ? sum / count : 0;
+      }
+    }
+    return hash;
+  }
+
+  // Dual-check: catches BOTH major screen changes AND localized changes
+  // (e.g. a new chat message in one corner while the rest of the screen is identical)
+  function isScreenUnchanged(newHash, oldHash) {
+    // Check 1: Overall cosine similarity (catches major layout changes)
+    const similarity = imageSimilarity(newHash, oldHash);
+    if (similarity < 0.90) return false; // Major change — definitely different
+
+    // Check 2: Max block delta (catches localized changes like a new chatbox message)
+    // A cursor blink changes a block by ~3-5 brightness units.
+    // A new question/text appearing changes a block by 20+ brightness units.
+    // Threshold of 15 filters noise while catching real content updates.
+    let maxDelta = 0;
+    for (let i = 0; i < newHash.length; i++) {
+      const delta = Math.abs(newHash[i] - oldHash[i]);
+      if (delta > maxDelta) maxDelta = delta;
+    }
+    if (maxDelta > 15) return false; // Localized change detected
+
+    // Both checks passed — screen is truly unchanged
+    return true;
+  }
+
+  // Cosine similarity between two perceptual hashes (0 = different, 1 = identical)
+  function imageSimilarity(hashA, hashB) {
+    if (!hashA || !hashB || hashA.length !== hashB.length) return 0;
+    let dotProduct = 0, magA = 0, magB = 0;
+    for (let i = 0; i < hashA.length; i++) {
+      dotProduct += hashA[i] * hashB[i];
+      magA += hashA[i] * hashA[i];
+      magB += hashB[i] * hashB[i];
+    }
+    magA = Math.sqrt(magA);
+    magB = Math.sqrt(magB);
+    if (magA === 0 || magB === 0) return 0;
+    return dotProduct / (magA * magB);
   }
 
   // ─── Start ──────────────────────────────────────────────────────
