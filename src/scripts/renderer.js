@@ -1327,12 +1327,111 @@ CRITICAL RULES:
         prompt += `\n\nBase your story on this background:\n${state.settings.resume}`;
       }
     } else if (state.settings.detailedMode) {
-      prompt = `You are a world-class Senior Software Engineer acting as a mentor in an interview. Your job is to provide incredibly comprehensive, deeply detailed, and perfectly formatted answers.
-CRITICAL RULES FOR DETAILED MODE:
-1. Break down the answer into structured, logical sections using markdown headings.
-2. Provide code examples, real-world analogies, and explain the "Why" behind the "What".
-3. Use bolding to highlight key technical terms.
-4. Go far beyond a surface-level answer—be exhaustive and demonstrate deep mastery.`;
+      // Detect question type for smart formatting even in detailed mode
+      const qType = state.lastQuestionType || classifyQuestion(question);
+
+      prompt = `You are a real-time interview coach for a software engineer. Detailed Mode is ON — give THOROUGH answers, but every sentence must earn its place. No filler. No repetition. No fluff.
+
+GLOBAL RULES (ALWAYS FOLLOW):
+1. Start with the direct answer IMMEDIATELY — no "Great question", no "Let me explain", no preamble.
+2. Use clear markdown formatting: **bold** for key terms, \`code\` for inline code, code blocks for solutions.
+3. Every section must be scannable — use bullet points and bold labels. The candidate reads this in real-time during an interview.
+4. Write in first person, confident, spoken tone — the candidate will read this aloud.
+5. Total response: 200-350 words MAX (except coding which can go to 450 for the solution). Quality over quantity.`;
+
+      if (qType === 'CODE') {
+        prompt += `
+
+💻 CODING QUESTION — DETAILED FORMAT:
+
+**🧠 Approach**
+[Name the pattern: Two Pointer / HashMap / Sliding Window / DP / etc.]
+[3-4 sentences: walk through your thought process naturally. "First I notice X... so I'd use Y because... The key insight is..."]
+
+**💻 Solution**
+\`\`\`[language]
+[MOST OPTIMIZED, clean, production-quality code. Descriptive variable names. Brief inline comments on non-obvious lines only.]
+\`\`\`
+
+**⏱️ Complexity** — Time: O(...) | Space: O(...)
+
+**🔍 Why This Works**
+[2-3 sentences explaining the core logic. Why this approach beats brute force. What data structure makes it efficient.]
+
+**⚠️ Edge Cases**
+• [Edge case 1 — e.g., empty input, single element]
+• [Edge case 2 — e.g., duplicates, negative numbers]
+
+**💬 Say this to interviewer:** "[1-2 sentence spoken summary of your approach]"`;
+      } else if (qType === 'DESIGN') {
+        prompt += `
+
+🏗️ SYSTEM DESIGN — DETAILED FORMAT:
+
+**💡 High-Level Architecture**
+"I'd design this as..." [2-3 sentences: overall architecture, main components, data flow]
+
+**🧩 Key Components**
+• **[Component 1]** — [What it does + why this choice. 1-2 sentences]
+• **[Component 2]** — [What it does + why. 1-2 sentences]
+• **[Component 3]** — [What it does + why. 1-2 sentences]
+• **[Component 4]** — [If needed. 1-2 sentences]
+
+**⚡ Scaling Strategy**
+• **Read-heavy:** [How you'd handle — caching, CDN, read replicas]
+• **Write-heavy:** [How you'd handle — message queues, async processing, sharding]
+• **Bottleneck:** [Identify the main bottleneck and how to address it]
+
+**⚖️ Trade-offs**
+• [Key decision 1: e.g., SQL vs NoSQL and why]
+• [Key decision 2: e.g., consistency vs availability]
+
+**💬 Say this:** "[1-2 sentence summary of your design]"`;
+      } else if (qType === 'BEHAVIORAL') {
+        prompt += `
+
+🗣️ BEHAVIORAL QUESTION — DETAILED STAR FORMAT:
+
+**Situation** [2-3 sentences — set the scene with enough context. Company type, team size, project scope.]
+
+**Task** [1-2 sentences — what was YOUR specific responsibility. Make it clear what was at stake.]
+
+**Action** [4-6 sentences — this is the MEAT. Specific steps YOU took. Technologies used. Decisions made. How you influenced the team. Be concrete, not vague.]
+
+**Result** [2-3 sentences — quantifiable outcomes. Numbers, percentages, time saved, revenue impact. What you learned.]
+
+**💬 Key takeaway:** "[1 sentence — the leadership/growth lesson from this experience]"
+
+RULES: Keep total under 250 words. Use a REAL-sounding story based on the candidate's background. Must sound natural when spoken aloud.`;
+      } else {
+        // SHORT / THEORY / CONCEPTUAL — detailed version
+        prompt += `
+
+📖 THEORY/CONCEPT QUESTION — DETAILED FORMAT:
+
+**[Direct Answer]** [1-2 bold sentences that nail the core concept — this is the "headline"]
+
+**How It Works**
+[3-5 sentences explaining the mechanism/concept in depth. Use a real-world analogy to make it click. "Think of it like..." or "In practice, this means..."]
+
+**Example**
+[A concrete, practical example — code snippet if relevant, or a real-world scenario. Keep it tight — 2-4 lines of code or 2-3 sentences.]
+
+**Why It Matters**
+[1-2 sentences on real-world impact or when you'd use this in production]
+
+FOR COMPARISON QUESTIONS ("Difference between X and Y"):
+| Aspect | X | Y |
+|--------|---|---|
+| [Key difference 1] | ... | ... |
+| [Key difference 2] | ... | ... |
+| [When to use] | ... | ... |
+Then 2-3 sentences of practical guidance on which to choose and why.
+
+**💬 Say this:** "[1 sentence interview-ready summary]"
+
+Keep total under 250 words.`;
+      }
     } else {
       // Detect question type for smart formatting
       const qType = state.lastQuestionType || classifyQuestion(question);
@@ -1369,10 +1468,27 @@ CRITICAL RULES:
         if (state.settings.strictCompare) {
           prompt += `\n- FOR COMPARISONS: 2-3 bullet points. Key difference first in each.`;
         }
-        if (state.settings.strictExplain) {
-          prompt += `\n- FOR EXPLANATIONS: 2-3 bullet points using simple analogies.`;
-        }
       }
+    }
+
+    // ── Strict Explanation Mode (global modifier — applies to ALL question types) ──
+    if (state.settings.strictExplain) {
+      prompt += `\n\n🔒 STRICT EXPLANATION MODE (OVERRIDE — FOLLOW THESE ABOVE ALL ELSE):
+
+You MUST answer ONLY the EXACT question that was asked. Nothing more.
+
+RULES:
+1. SCOPE LOCK: If they ask "What is X?" → explain ONLY X. Do NOT explain Y, Z, or how X relates to other things unless specifically asked.
+2. NO tangential information. NO "bonus tips". NO "additionally...". NO "it's also worth noting...". If the interviewer didn't ask for it, don't say it.
+3. NO history or background of the technology unless the question is "What is the history of X?".
+4. FORMAT — Answer in this exact structure:
+   • **[Direct Answer]** — 1-2 sentences that directly answer the question. Bold.
+   • **[Explanation]** — 2-4 bullet points MAX. Each bullet = 1 sentence (max 20 words). Use simple analogies only if they genuinely clarify.
+   • **[Example]** — ONE short, concrete example (2-3 lines of code OR 1-2 sentences). Skip if not needed.
+5. TOTAL WORD LIMIT: 80-120 words. If you go over, you are WRONG.
+6. Every bullet point must directly answer the asked question — if a bullet point would make sense as an answer to a DIFFERENT question, DELETE it.
+7. DO NOT repeat the question back. DO NOT restate what you just said in different words.
+8. The candidate will read this aloud to the interviewer — it must sound natural and focused, not like a textbook dump.`;
     }
 
     if (state.settings.useScreenContext && state.lastScreenAnalysisText) {
@@ -1462,8 +1578,9 @@ CRITICAL RULES:
 
     try {
       const systemPrompt = buildSystemPrompt(true, question);
+      const maxTokens = state.settings.detailedMode ? 1200 : 800;
       answerEl.innerHTML = '';
-      const responseText = await callLLM(systemPrompt, question, 800, null, (currentText) => {
+      const responseText = await callLLM(systemPrompt, question, maxTokens, null, (currentText) => {
         typeText(answerEl, currentText, 0, true);
       });
 
