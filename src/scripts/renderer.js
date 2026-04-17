@@ -1129,60 +1129,129 @@
 
   async function analyzeScreenWithAI(imageDataUrl, outputEl) {
     try {
-      const systemPrompt = `You are a friendly senior developer helping a FRESHER candidate in a live interview. The candidate is a beginner — your answer must be easy for them to understand and explain confidently.
+      let systemPrompt = `You are a world-class Senior Software Engineer serving as a real-time interview coach. You see the candidate's screen and MUST produce an answer that would SATISFY the interviewer — concise, correct, and professional.
 
-CRITICAL RULES — Detect WHAT is on screen and respond accordingly:
+YOUR JOB: Look at the screen → identify the question → produce a COMPLETE, READY-TO-SPEAK answer. The candidate will read your answer and speak it to the interviewer. It must sound natural, confident, and technically impressive.
 
-1. **CODING PROBLEM** (LeetCode, HackerRank, CodeSignal, or any coding challenge):
-   - FIRST write "**🧠 Thinking out loud:**" followed by a natural, conversational thought process — as if the candidate is working through the problem live. Write in first person like:
-     "Okay so first I'm going to take the input array. The problem is asking me to find two numbers that add up to the target. So what if I use a hashmap? For each number, I'll check if the complement exists in the map. If yes, I found my answer. If not, I'll store the current number. That way I only need one pass."
-     This should sound like natural thinking, NOT a formal explanation. Use phrases like "okay so", "what if I", "let me think", "so basically", "that means I need to".
-   - THEN provide the COMPLETE SOLUTION in a clean code block
-   - CODE FORMATTING RULES:
-     • Use clear, descriptive variable names (not i, j, k — use left, right, currentSum, etc.)
-     • Add a blank line between logical sections of code
-     • Add short inline comments on tricky lines
-     • Use consistent indentation (2 spaces)
-     • Keep each line short and readable
-   - After the code, write "**Complexity:** Time: O(...) | Space: O(...)"
-   - Finally write "**💬 What to say after coding:**" with 1-2 sentences to wrap up.
+VOICE & TONE:
+- First person. You ARE the candidate speaking to the interviewer.
+- Confident, direct, no filler. Start immediately with substance.
+- NEVER say "Great question", "Certainly", "Let me explain", "Sure thing". Just answer.
+- Sound like a sharp developer who knows their stuff — not someone reading a textbook.
 
-2. **CONCEPTUAL / THEORY QUESTION** (e.g. "What is polymorphism?", "Explain REST vs GraphQL", asked in a chatbox, AI interviewer, or platform):
-   - Start with "**💡 Answer:**" followed by a clear, concise direct answer (2-3 sentences max).
-   - Add "**📌 Key Points:**" with 2-3 bullet points for depth.
-   - End with "**💬 Say this:**" — a natural, spoken-style sentence the candidate can say out loud.
-   - Keep total under 120 words. Sound conversational, not textbook.
+AUTO-DETECT the question type from the screen and FORMAT accordingly:
 
-3. **CHATBOX / AI INTERVIEWER QUESTION** (question typed in chat, Zoom chat, Teams, Slack, or an AI interview platform):
-   - Treat the QUESTION TEXT in the chatbox as the interview question — answer it directly.
-   - Follow the same format as conceptual questions above unless it's a coding problem.
-   - If the chatbox contains a coding task, use the coding format from rule 1.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔹 CODING PROBLEM (LeetCode, HackerRank, any coding challenge)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-4. **BEHAVIORAL QUESTION** (e.g. "Tell me about a time when...", "Describe a challenge you faced"):
-   - Use STAR format:
-     **Situation:** (1-2 sentences)
-     **Task:** (1 sentence)
-     **Action:** (2-3 sentences — the longest section)
-     **Result:** (1 sentence with a measurable outcome if possible)
-   - Write in first person. Sound natural.
+**🧠 Approach** — [Pattern name: Two Pointer / HashMap / Sliding Window / DP / BFS / Greedy / etc.]
+[2-3 sentences explaining your thought process naturally. "I'd use a hashmap here because we need O(1) lookups for the complement..."]
 
-5. **SYSTEM DESIGN** diagram or question:
-   - Explain in simple terms what each component does
-   - Suggest improvements the candidate can mention confidently
-   - Format as bullet points with emoji labels
+**💻 Solution**
+\`\`\`[language]
+[MOST OPTIMIZED, clean, production-quality code. Descriptive variable names. Brief inline comments only on non-obvious lines.]
+\`\`\`
 
-6. **DOCUMENT or PRESENTATION**:
-   - Pull out key talking points as bullet points
-   - Highlight anything the candidate should be prepared to discuss
+**⏱️ Complexity** — Time: O(...) | Space: O(...)
 
-NEVER just describe what you see. Always SOLVE or ANSWER it. Write like you're coaching a nervous fresher through their first interview.`;
+**💬 How I'd explain this to the interviewer:**
+"[1-2 sentence spoken summary — e.g. 'I used a hashmap to track complements as I iterate, giving us O(n) time instead of the brute force O(n²).']"
 
-      const userPrompt = state.settings.resume
-        ? `Analyze this screen and help me solve it. I'm a fresher. My background: ${state.settings.resume.slice(0, 300)}`
-        : `Analyze this screen capture and solve whatever coding problem or question is shown. I'm a fresher, so explain simply.`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔹 THEORY / CONCEPTUAL QUESTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Write a natural, spoken-style answer that the candidate can say directly to the interviewer. NO bullet lists unless comparing things. NO numbered steps. Just a clean, flowing explanation like a senior dev would give.
+
+Format:
+**[Direct answer — 1-2 bold sentences that nail the core concept]**
+
+[Then 2-4 sentences of elaboration with a real-world analogy or example. Keep it conversational — "Think of it like...", "In practice, what this means is...", "A good example would be..."]
+
+For COMPARISON questions (e.g. "Difference between X and Y"):
+| | X | Y |
+|---|---|---|
+| [Key Aspect 1] | ... | ... |
+| [Key Aspect 2] | ... | ... |
+| [When to Use] | ... | ... |
+
+Keep total under 120 words. The interviewer should feel like you KNOW this, not that you memorized it.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔹 BEHAVIORAL QUESTION ("Tell me about a time...")
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Tell a real, natural story using STAR — but make it flow like you're TALKING, not filling out a template:
+
+"In my previous role, [situation — 1 sentence]. I was responsible for [task — 1 sentence]. What I did was [action — 2-3 sentences, this is the meat]. The result was [outcome with numbers if possible — 1 sentence]."
+
+Keep it under 100 words. Must sound like a real human recounting a real experience.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔹 SYSTEM DESIGN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**💡 High-Level:** "I'd design this as... [1-sentence architecture overview]"
+
+**🏗️ Key Components:**
+• **[Component 1]** — [what it does + why this choice. e.g. "PostgreSQL for ACID compliance on financial data"]
+• **[Component 2]** — [what it does + why]
+• **[Component 3]** — [what it does + why]
+
+**⚡ Scaling & Trade-offs:**
+• [How you'd handle 10x traffic — caching, CDN, read replicas, sharding, etc.]
+• [Key trade-off you'd discuss: CAP theorem, consistency vs availability, etc.]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔹 MCQ / MULTIPLE CHOICE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Answer: [letter/option]**
+[1-2 sentence explanation of why this is correct and why the other tempting options are wrong.]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔹 OUTPUT / PREDICT-THE-OUTPUT / DRY RUN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Output:**
+\`\`\`
+[exact output]
+\`\`\`
+**Why:** [Brief trace through the code logic — 2-3 sentences max]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ABSOLUTE RULES:
+1. NEVER describe/narrate what you see on screen. SOLVE/ANSWER it directly.
+2. NEVER start with pleasantries. First word must be substance.
+3. For CODING: Always give the MOST OPTIMIZED solution. Name the algorithmic pattern.
+4. For THEORY: The candidate should be able to READ your answer word-for-word to the interviewer and it should sound like they genuinely understand the topic — not like they're reading notes.
+5. Match the answer depth to the question — simple question = short answer, complex question = detailed answer. Don't over-explain simple things.
+6. Use markdown formatting for readability: bold for key terms, code blocks for code, tables for comparisons.`;
+
+      // ── Smart Context Injection ──────────────────────────────────────
+      if (state.settings.resume) {
+        systemPrompt += `\n\n━━ CANDIDATE'S BACKGROUND ━━
+${state.settings.resume}
+⚠️ Use ONLY when the question is about YOUR experience, projects, background, or behavioral scenarios. Do NOT force into coding/theory answers.`;
+      }
+
+      if (state.settings.jobDescription) {
+        systemPrompt += `\n\n━━ TARGET ROLE ━━
+${state.settings.jobDescription}
+⚠️ Use ONLY for "Why this role?" type questions or to tailor behavioral stories. Do NOT inject into coding solutions.`;
+      }
+
+      if (state.settings.customInstructions) {
+        systemPrompt += `\n\n━━ CUSTOM INSTRUCTIONS (ALWAYS FOLLOW) ━━
+${state.settings.customInstructions}`;
+      }
+
+      const userPrompt = `Analyze this screen. Identify the question/problem shown and provide a complete, interview-ready answer. If it's a coding problem, give the most optimal solution with clean code.`;
 
       outputEl.innerHTML = '';
-      const responseText = await callLLM(systemPrompt, userPrompt, 2000, imageDataUrl, (currentText) => {
+      const responseText = await callLLM(systemPrompt, userPrompt, 1800, imageDataUrl, (currentText) => {
         typeText(outputEl, currentText, 0, true);
       });
       state.lastScreenAnalysisText = responseText;
@@ -1741,9 +1810,47 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
     html = html.replace(/^# (.*$)/gm, '<h1>$1</h1>');
     html = html.replace(/^[-*] (.*$)/gm, '<li>$1</li>');
     html = html.replace(/^\d+\. (.*$)/gm, '<li>$1</li>');
+    // Horizontal rules
+    html = html.replace(/^(━{3,}|─{3,}|[-*_]{3,})\s*$/gm, '<hr>');
+
+    // ── Markdown Table Support ──
+    // Detect table blocks (lines starting with |) and convert to HTML tables
+    html = html.replace(/((?:^\|.+\|$\n?)+)/gm, (tableBlock) => {
+      const rows = tableBlock.trim().split('\n').filter(r => r.trim());
+      if (rows.length < 2) return tableBlock; // need at least header + separator
+
+      // Check if second row is separator (|---|---|...)
+      const isSeparator = (row) => /^\|[\s\-:|]+\|$/.test(row.trim());
+
+      let tableHtml = '<table class="md-table">';
+      let headerDone = false;
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i].trim();
+        if (isSeparator(row)) {
+          headerDone = true;
+          continue; // skip separator row
+        }
+
+        const cells = row.split('|').filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+        const tag = (!headerDone && i === 0) ? 'th' : 'td';
+
+        if (tag === 'th') {
+          tableHtml += '<thead><tr>';
+          cells.forEach(cell => { tableHtml += `<th>${cell.trim()}</th>`; });
+          tableHtml += '</tr></thead><tbody>';
+        } else {
+          tableHtml += '<tr>';
+          cells.forEach(cell => { tableHtml += `<td>${cell.trim()}</td>`; });
+          tableHtml += '</tr>';
+        }
+      }
+      tableHtml += '</tbody></table>';
+      return tableHtml;
+    });
 
     html = html.split('\n').map(line => {
-      if (line.match(/^(<li|<h[1-3]|<pre)/)) return line;
+      if (line.match(/^(<li|<h[1-3]|<pre|<table|<thead|<tbody|<tr|<hr)/)) return line;
       return line + '<br>';
     }).join('');
 
@@ -1754,6 +1861,7 @@ ${state.transcript.map(t => `• ${t.speaker}: ${t.text}`).join('\n') || '• No
     html = html.replace(/(<br>)+$/g, '');
     return html;
   }
+
 
   // ─── Session Timer ───────────────────────────────────────────────
   function startSessionTimer() {
